@@ -1,0 +1,197 @@
+{
+  "star-add-dependency": {
+    "description": "Add npm dependency. Use only when required for feature implementation.",
+    "parameters": {
+      "type": "object",
+      "required": ["package"],
+      "properties": {
+        "package": {
+          "type": "string",
+          "example": "lodash@latest"
+        }
+      }
+    }
+  },
+
+  "star-search-files": {
+    "description": "Regex-based project search. ALWAYS prefer this before reading files manually. Used for understanding structure before edits.",
+    "parameters": {
+      "type": "object",
+      "required": ["query", "include_pattern"],
+      "properties": {
+        "query": { "type": "string" },
+        "include_pattern": { "type": "string" },
+        "exclude_pattern": { "type": "string" },
+        "case_sensitive": { "type": "boolean" }
+      }
+    }
+  },
+
+  "star-write": {
+    "description": "Write new files OR fallback full rewrites. AVOID unless necessary. Prefer modular creation.",
+    "parameters": {
+      "type": "object",
+      "required": ["file_path", "content"],
+      "properties": {
+        "file_path": { "type": "string" },
+        "content": { "type": "string" }
+      }
+    }
+  },
+
+  "star-line-replace": {
+    "description": "PRIMARY tool for editing. ALWAYS prefer this for modifying existing files. Use ellipsis (...) for large blocks.",
+    "parameters": {
+      "type": "object",
+      "required": ["file_path", "search", "first_replaced_line", "last_replaced_line", "replace"],
+      "properties": {
+        "file_path": { "type": "string" },
+        "search": { "type": "string" },
+        "first_replaced_line": { "type": "number" },
+        "last_replaced_line": { "type": "number" },
+        "replace": { "type": "string" }
+      }
+    }
+  },
+
+  "star-download-to-repo": {
+    "description": "Download external assets (images, files) into project. Use for real UI assets only.",
+    "parameters": {
+      "type": "object",
+      "required": ["source_url", "target_path"],
+      "properties": {
+        "source_url": { "type": "string" },
+        "target_path": { "type": "string" }
+      }
+    }
+  },
+
+  "star-fetch-website": {
+    "description": "Fetch external website (UI inspiration / scraping structure). Use in CREATE mode for product inspiration.",
+    "parameters": {
+      "type": "object",
+      "required": ["url"],
+      "properties": {
+        "url": { "type": "string" },
+        "formats": { "type": "string" }
+      }
+    }
+  },
+
+  "star-copy": {
+    "description": "Copy files inside project. Useful for templating components.",
+    "parameters": {
+      "type": "object",
+      "required": ["source_file_path", "destination_file_path"],
+      "properties": {
+        "source_file_path": { "type": "string" },
+        "destination_file_path": { "type": "string" }
+      }
+    }
+  },
+
+  "star-view": {
+    "description": "Read file contents. ONLY use if not already in context.",
+    "parameters": {
+      "type": "object",
+      "required": ["file_path"],
+      "properties": {
+        "file_path": { "type": "string" },
+        "lines": { "type": "string" }
+      }
+    }
+  },
+
+  "star-read-console-logs": {
+    "description": "DEBUG FIRST. Always check logs before fixing issues.",
+    "parameters": {
+      "type": "object",
+      "required": ["search"],
+      "properties": {
+        "search": { "type": "string" }
+      }
+    }
+  },
+
+  "star-read-network-requests": {
+    "description": "Check API/network behavior before debugging frontend.",
+    "parameters": {
+      "type": "object",
+      "required": ["search"],
+      "properties": {
+        "search": { "type": "string" }
+      }
+    }
+  },
+
+  "star-remove-dependency": {
+    "description": "Remove unused dependencies.",
+    "parameters": {
+      "type": "object",
+      "required": ["package"],
+      "properties": {
+        "package": { "type": "string" }
+      }
+    }
+  },
+
+  "star-rename": {
+    "description": "Rename files properly (DO NOT recreate).",
+    "parameters": {
+      "type": "object",
+      "required": ["original_file_path", "new_file_path"],
+      "properties": {
+        "original_file_path": { "type": "string" },
+        "new_file_path": { "type": "string" }
+      }
+    }
+  },
+
+  "star-delete": {
+    "description": "Delete unnecessary files cleanly.",
+    "parameters": {
+      "type": "object",
+      "required": ["file_path"],
+      "properties": {
+        "file_path": { "type": "string" }
+      }
+    }
+  },
+
+  "secrets--add_secret": {
+    "description": "Securely request API keys. NEVER ask user directly.",
+    "parameters": {
+      "type": "object",
+      "required": ["secret_name"],
+      "properties": {
+        "secret_name": { "type": "string" }
+      }
+    }
+  },
+
+  "imagegen--generate_image": {
+    "description": "Generate UI images (hero, banners). Prefer this over placeholders.",
+    "parameters": {
+      "type": "object",
+      "required": ["prompt", "target_path"],
+      "properties": {
+        "prompt": { "type": "string" },
+        "target_path": { "type": "string" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "model": { "type": "string" }
+      }
+    }
+  },
+
+  "websearch--web_search": {
+    "description": "Use for latest libraries, UI inspiration, or unknown tech.",
+    "parameters": {
+      "type": "object",
+      "required": ["query"],
+      "properties": {
+        "query": { "type": "string" }
+      }
+    }
+  }
+}

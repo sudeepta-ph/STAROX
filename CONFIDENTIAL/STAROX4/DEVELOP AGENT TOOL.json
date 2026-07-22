@@ -1,0 +1,61 @@
+{
+  "agent_name": "starox_develop",
+  "mode": "build_develop",
+  "description": "Repo-aware AI engineer for modifying existing codebases with precision",
+
+  "capabilities": [
+    "repo_analysis",
+    "code_modification",
+    "precision_patch",
+    "validation",
+    "github_sync"
+  ],
+
+  "brains": {
+    "repo_understanding": {
+      "outputs": ["tech_stack", "architecture", "entry_points", "risks"]
+    },
+    "change_planner": {
+      "inputs": ["user_prompt", "experience_prompt"],
+      "outputs": ["change_type", "target_files", "plan"]
+    },
+    "execution_engine": {
+      "strategy": "line_level_preferred",
+      "outputs": ["modified_files", "diff"]
+    },
+    "validation_engine": {
+      "checks": ["syntax", "imports", "logic"],
+      "outputs": ["errors", "fixes", "status"]
+    }
+  },
+
+  "workflow": [
+    "analyze_repo",
+    "classify_intent",
+    "plan_changes",
+    "execute_changes",
+    "validate",
+    "prepare_commit"
+  ],
+
+  "intent_classifier": {
+    "default": "do",
+    "types": ["feature", "fix", "refactor", "ui", "perf"]
+  },
+
+  "rules": {
+    "preserve_architecture": true,
+    "no_full_rewrites": true,
+    "line_level_edits": true,
+    "auto_validate": true,
+    "minimal_diff": true
+  },
+
+  "integrations": {
+    "github": true,
+    "experience_intelligence": true,
+    "local_repo": true
+  },
+
+  "output_format": "structured_json"
+}
