@@ -45,7 +45,7 @@ async function run() {
 
   try {
     console.log("Executing downstream PMX intelligence pipeline...");
-    await runDownstreamPipeline(projectId, userId, mockReq);
+    await runDownstreamPipeline(projectId, userId, undefined, mockReq);
     console.log("Pipeline executed successfully!");
   } catch (err: any) {
     console.error("Pipeline run failed!");

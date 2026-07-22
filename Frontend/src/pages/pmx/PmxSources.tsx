@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -15,9 +15,11 @@ import {
   Trash2,
   ExternalLink,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Database
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -29,13 +31,18 @@ import {
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
 export default function PmxSources() {
-  const { inputs, fetchInputs, runPipeline, loading } = usePmxStore();
+  const { inputs, fetchInputs, runPipeline, loading, selectedSourceIds, setSelectedSourceIds } = usePmxStore();
   const { toast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState("all");
+  const [quickFilter, setQuickFilter] = useState<"all" | "selected" | "unselected" | "processed" | "not_processed">("all");
   const [isAdding, setIsAdding] = useState(false);
   const [selectedInput, setSelectedInput] = useState<any>(null);
+  
+  // Pipeline Status Phase for Badges
+  const [pipelinePhase, setPipelinePhase] = useState<"idle" | "queued" | "processing" | "analyzing" | "completed" | "failed">("idle");
+  const [lastCheckedIndex, setLastCheckedIndex] = useState<number | null>(null);
 
   // Form State
   const [name, setName] = useState("");
@@ -44,13 +51,157 @@ export default function PmxSources() {
   const [content, setContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    let timer1: any;
+    let timer2: any;
+
+    const onStart = () => {
+      setPipelinePhase("queued");
+      timer1 = setTimeout(() => setPipelinePhase("processing"), 2500);
+      timer2 = setTimeout(() => setPipelinePhase("analyzing"), 8000);
+    };
+
+    const onCompleted = () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      setPipelinePhase("completed");
+      setTimeout(() => setPipelinePhase("idle"), 5000);
+    };
+
+    const onFailed = () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      setPipelinePhase("failed");
+      setTimeout(() => setPipelinePhase("idle"), 5000);
+    };
+
+    window.addEventListener("pmx-pipeline-started", onStart);
+    window.addEventListener("pmx-pipeline-completed", onCompleted);
+    window.addEventListener("pmx-pipeline-failed", onFailed);
+
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      window.removeEventListener("pmx-pipeline-started", onStart);
+      window.removeEventListener("pmx-pipeline-completed", onCompleted);
+      window.removeEventListener("pmx-pipeline-failed", onFailed);
+    };
+  }, []);
+
   const filteredInputs = inputs.filter((input) => {
     const matchesSearch =
       input.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (input.summary && input.summary.toLowerCase().includes(searchQuery.toLowerCase()));
+      
+    let matchesQuick = true;
+    if (quickFilter === "selected") {
+      matchesQuick = selectedSourceIds.includes(input._id);
+    } else if (quickFilter === "unselected") {
+      matchesQuick = !selectedSourceIds.includes(input._id);
+    } else if (quickFilter === "processed") {
+      matchesQuick = !!input.summary && input.summary !== "Processing AI Summary...";
+    } else if (quickFilter === "not_processed") {
+      matchesQuick = !input.summary || input.summary === "Processing AI Summary...";
+    }
+
     const matchesFilter = filterType === "all" || input.type === filterType;
-    return matchesSearch && matchesFilter;
+    return matchesSearch && matchesQuick && matchesFilter;
   });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        document.activeElement?.tagName === "INPUT" ||
+        document.activeElement?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelectedSourceIds(filteredInputs.map(i => i._id));
+        toast({
+          title: "Selected All",
+          description: `Selected all ${filteredInputs.length} matching sources.`
+        });
+      } else if (e.key === "Escape") {
+        setSelectedSourceIds([]);
+        toast({
+          title: "Deselected All",
+          description: "Cleared all selections."
+        });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [filteredInputs, selectedSourceIds, setSelectedSourceIds]);
+
+  const handleCheckboxClick = (index: number, id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    
+    if (e.shiftKey && lastCheckedIndex !== null) {
+      const start = Math.min(lastCheckedIndex, index);
+      const end = Math.max(lastCheckedIndex, index);
+      const rangeIds = filteredInputs.slice(start, end + 1).map(i => i._id);
+      
+      const isCurrentlyChecked = selectedSourceIds.includes(id);
+      let newSelection = [...selectedSourceIds];
+      
+      if (isCurrentlyChecked) {
+        newSelection = newSelection.filter(x => !rangeIds.includes(x));
+      } else {
+        rangeIds.forEach(rid => {
+          if (!newSelection.includes(rid)) {
+            newSelection.push(rid);
+          }
+        });
+      }
+      setSelectedSourceIds(newSelection);
+    } else {
+      if (selectedSourceIds.includes(id)) {
+        setSelectedSourceIds(selectedSourceIds.filter(x => x !== id));
+      } else {
+        setSelectedSourceIds([...selectedSourceIds, id]);
+      }
+    }
+    setLastCheckedIndex(index);
+  };
+
+  const renderStatusBadge = (input: any) => {
+    if (pipelinePhase === "idle") return null;
+
+    const isInputSelected = selectedSourceIds.includes(input._id);
+    if (!isInputSelected) {
+      return (
+        <span className="text-[9px] font-semibold px-2 py-0.5 rounded border bg-zinc-900 border-zinc-800 text-zinc-500">
+          Skipped
+        </span>
+      );
+    }
+
+    const badgeStyles = {
+      queued: "bg-yellow-500/10 border-yellow-500/20 text-yellow-400 animate-pulse",
+      processing: "bg-blue-500/10 border-blue-500/20 text-blue-400 animate-pulse",
+      analyzing: "bg-purple-500/10 border-purple-500/20 text-purple-400 animate-pulse",
+      completed: "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
+      failed: "bg-red-500/10 border-red-500/20 text-red-400"
+    }[pipelinePhase];
+
+    const label = {
+      queued: "Queued",
+      processing: "Processing",
+      analyzing: "Analyzing",
+      completed: "Completed",
+      failed: "Failed"
+    }[pipelinePhase];
+
+    return (
+      <span className={`text-[9px] font-semibold px-2 py-0.5 rounded border ${badgeStyles}`}>
+        {label}
+      </span>
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,35 +365,95 @@ export default function PmxSources() {
           </div>
         </div>
 
+        {/* Quick Selection and Filter Actions Toolbar */}
+        <div className="px-4 py-2 border-b border-zinc-900 bg-zinc-950/40 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 scrollbar-none">
+            {(["all", "selected", "unselected", "processed", "not_processed"] as const).map((qf) => {
+              const label = {
+                all: "All",
+                selected: `Selected (${selectedSourceIds.length})`,
+                unselected: "Unselected",
+                processed: "Processed",
+                not_processed: "Pending"
+              }[qf];
+              const active = quickFilter === qf;
+              return (
+                <button
+                  key={qf}
+                  onClick={() => setQuickFilter(qf)}
+                  className={`px-3 py-1 rounded-full text-[10px] font-semibold border transition-all shrink-0 ${
+                    active
+                      ? "bg-sky-500/10 border-sky-500/20 text-sky-400"
+                      : "bg-zinc-900/20 border-zinc-900 text-zinc-500 hover:text-zinc-400 hover:border-zinc-800"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => {
+                setSelectedSourceIds(filteredInputs.map(i => i._id));
+                toast({ title: "Selected All", description: "All matching inputs have been checked." });
+              }}
+              className="text-[10px] font-semibold text-zinc-500 hover:text-sky-400 transition-colors"
+            >
+              Select All
+            </button>
+            <span className="text-zinc-800 text-[10px]">|</span>
+            <button
+              onClick={() => {
+                setSelectedSourceIds([]);
+                toast({ title: "Deselected All", description: "Selections cleared." });
+              }}
+              className="text-[10px] font-semibold text-zinc-500 hover:text-red-400 transition-colors"
+            >
+              Deselect All
+            </button>
+          </div>
+        </div>
+
         {/* Inputs List Wall */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2 scrollbar-thin">
-          {filteredInputs.map((input) => {
+          {filteredInputs.map((input, index) => {
             const isSelected = selectedInput?._id === input._id;
+            const isChecked = selectedSourceIds.includes(input._id);
             return (
               <div
                 key={input._id}
                 onClick={() => setSelectedInput(input)}
                 className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
-                  isSelected
-                    ? "bg-[#18181b] border-sky-500/50 shadow-[0_0_12px_rgba(56,189,248,0.1)]"
+                  isChecked
+                    ? "bg-[#18181b] border-sky-500/50 shadow-[0_0_12px_rgba(56,189,248,0.12)]"
+                    : isSelected
+                    ? "bg-zinc-900/55 border-zinc-800"
                     : "bg-zinc-950/40 border-zinc-900 hover:border-zinc-800"
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800">
+                  <Checkbox
+                    checked={isChecked}
+                    onClick={(e) => handleCheckboxClick(index, input._id, e)}
+                    className="border-zinc-700 data-[state=checked]:bg-sky-500 data-[state=checked]:border-sky-500 data-[state=checked]:text-black shrink-0"
+                  />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800 shrink-0">
                     {getInputIcon(input.type)}
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h4 className="text-xs font-semibold text-white truncate">{input.name}</h4>
-                      <span className="text-[9px] uppercase font-mono text-zinc-500 bg-zinc-900 px-1 py-0.5 rounded border border-zinc-800">
+                      <span className="text-[9px] uppercase font-mono text-zinc-500 bg-zinc-900 px-1 py-0.5 rounded border border-zinc-800 shrink-0">
                         {input.type}
                       </span>
                     </div>
                     <p className="text-[10px] text-zinc-400 mt-1 line-clamp-1">{input.summary || "Extracting PM signals..."}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3 shrink-0">
+                  {renderStatusBadge(input)}
                   <span className="text-[9px] text-zinc-500">
                     {new Date(input.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
                   </span>

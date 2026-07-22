@@ -155,6 +155,7 @@ export interface IPmxEvidence extends Document {
   importance: number; // 1 to 5
   relatedFeatures: string[];
   relatedProblems: string[];
+  sourceInputIds?: string[];
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -178,6 +179,7 @@ const PmxEvidenceSchema = new Schema<IPmxEvidence>(
     importance: { type: Number, min: 1, max: 5, default: 3 },
     relatedFeatures: [{ type: String }],
     relatedProblems: [{ type: String }],
+    sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -258,6 +260,7 @@ export interface IPmxProblem extends Document {
   userImpact: string;
   suggestedFix: string;
   affectedFeatures: string[];
+  sourceInputIds?: string[];
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -282,6 +285,7 @@ const PmxProblemSchema = new Schema<IPmxProblem>(
     userImpact: { type: String, required: true },
     suggestedFix: { type: String, required: true },
     affectedFeatures: [{ type: String }],
+    sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -306,6 +310,7 @@ export interface IPmxOpportunity extends Document {
   iceScore: number;
   riceScore: number;
   risk: string; // low/medium/high
+  sourceInputIds?: string[];
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -326,6 +331,7 @@ const PmxOpportunitySchema = new Schema<IPmxOpportunity>(
     iceScore: { type: Number, default: 0 },
     riceScore: { type: Number, default: 0 },
     risk: { type: String, enum: ["low", "medium", "high"], default: "medium" },
+    sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -364,6 +370,7 @@ export interface IPmxDecision extends Document {
   estimatedROI: string;
   alternativeSolutions: string[];
   status: "pending" | "approved" | "rejected" | "implemented";
+  sourceInputIds?: string[];
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -388,6 +395,7 @@ const PmxDecisionSchema = new Schema<IPmxDecision>(
     estimatedROI: { type: String, required: true },
     alternativeSolutions: [{ type: String }],
     status: { type: String, enum: ["pending", "approved", "rejected", "implemented"], default: "pending" },
+    sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -420,6 +428,7 @@ export interface IPmxSolution extends Document {
     prd: string;
     techSpecs: string;
   }>;
+  sourceInputIds?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -445,6 +454,7 @@ const PmxSolutionSchema = new Schema<IPmxSolution>(
     uxImprovements: { type: String },
     edgeCases: { type: String },
     version: { type: Number, default: 1 },
+    sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
     history: [
       {
@@ -476,6 +486,7 @@ export interface IPmxExecutionTask extends Document {
   timeEstimate: string; // e.g. "2h", "1d", "3d"
   assignee?: string;
   dependencies: string[];
+  sourceInputIds?: string[];
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -500,6 +511,7 @@ const PmxExecutionTaskSchema = new Schema<IPmxExecutionTask>(
     timeEstimate: { type: String, default: "1d" },
     assignee: { type: String },
     dependencies: [{ type: String }],
+    sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -517,6 +529,7 @@ export interface IPmxArtifact extends Document {
   type: "prd" | "roadmap" | "technical_spec" | "sprint_plan" | "product_strategy" | "ux_audit" | "engineering_plan";
   content: string; // raw content or markdown
   format: "markdown" | "pdf" | "json";
+  sourceInputIds?: string[];
   isDeleted: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -535,6 +548,7 @@ const PmxArtifactSchema = new Schema<IPmxArtifact>(
     },
     content: { type: String, required: true },
     format: { type: String, enum: ["markdown", "pdf", "json"], default: "markdown" },
+    sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
@@ -672,3 +686,44 @@ const PmxScreenshotProjectSchema = new Schema<IPmxScreenshotProject>(
 );
 
 export const PmxScreenshotProjectModel = mongoose.model<IPmxScreenshotProject>("PmxScreenshotProject", PmxScreenshotProjectSchema);
+
+// ==========================================
+// 13. PIPELINE RUN SESSIONS MODEL
+// ==========================================
+export interface IPmxSession extends Document {
+  projectId: string;
+  userId: string;
+  selectedSourceIds: string[];
+  resultsSummary: {
+    evidenceCount: number;
+    problemCount: number;
+    opportunityCount: number;
+    decisionCount: number;
+    solutionCount: number;
+    taskCount: number;
+  };
+  aiModel: string;
+  durationMs: number;
+  createdAt: Date;
+}
+
+const PmxSessionSchema = new Schema<IPmxSession>(
+  {
+    projectId: { type: String, required: true, index: true },
+    userId: { type: String, required: true, index: true },
+    selectedSourceIds: [{ type: String }],
+    resultsSummary: {
+      evidenceCount: { type: Number, default: 0 },
+      problemCount: { type: Number, default: 0 },
+      opportunityCount: { type: Number, default: 0 },
+      decisionCount: { type: Number, default: 0 },
+      solutionCount: { type: Number, default: 0 },
+      taskCount: { type: Number, default: 0 }
+    },
+    aiModel: { type: String, required: true },
+    durationMs: { type: Number, required: true }
+  },
+  { timestamps: { createdAt: true, updatedAt: false } }
+);
+
+export const PmxSessionModel = mongoose.model<IPmxSession>("PmxSession", PmxSessionSchema);

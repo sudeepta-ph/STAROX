@@ -200,7 +200,9 @@ interface PmxStore {
   fetchArtifacts: () => Promise<void>;
   fetchHistory: () => Promise<void>;
   fetchAll: () => Promise<void>;
-  runPipeline: () => Promise<void>;
+  runPipeline: (selectedSourceIds?: string[]) => Promise<void>;
+  selectedSourceIds: string[];
+  setSelectedSourceIds: (ids: string[]) => void;
 }
 
 export const usePmxStore = create<PmxStore>((set, get) => ({
@@ -216,6 +218,8 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
   tasks: [],
   artifacts: [],
   history: [],
+  selectedSourceIds: [],
+  setSelectedSourceIds: (ids) => set({ selectedSourceIds: ids }),
 
   loading: {
     inputs: false,
@@ -407,14 +411,17 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     ]);
   },
 
-  runPipeline: async () => {
+  runPipeline: async (selectedSourceIds) => {
     set((state) => ({ loading: { ...state.loading, pipeline: true } }));
     try {
       const headers = await getPmxHeaders();
       const res = await fetch(`${API_URL}/pmx/inputs/process`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ projectId: get().projectId })
+        body: JSON.stringify({
+          projectId: get().projectId,
+          selectedSourceIds: selectedSourceIds || get().selectedSourceIds
+        })
       });
       if (res.ok) {
         await get().fetchAll();

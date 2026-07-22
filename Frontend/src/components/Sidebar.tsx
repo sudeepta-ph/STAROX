@@ -12,6 +12,7 @@ import { useClerk } from "@clerk/clerk-react";
 import AuthModal from "./AuthModal";
 import { useSidebarStore } from "@/lib/sidebarStore";
 import { usePmxStore } from "@/lib/pmxStore";
+import { useToast } from "@/components/ui/use-toast";
 
 const mainNav = [
   { name: "STAROX Intelligence",  icon: LayoutDashboard, path: "/starox-intelligence" },
@@ -58,7 +59,9 @@ const Sidebar = () => {
   const { user } = useAuthStore();
   const { signOut } = useClerk();
   const { collapsed, toggle } = useSidebarStore();
-  const { runPipeline, loading } = usePmxStore();
+  const { runPipeline, loading, selectedSourceIds, inputs } = usePmxStore();
+  const { toast } = useToast();
+  const [showConfirm, setShowConfirm] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -191,7 +194,7 @@ const Sidebar = () => {
                           </>
                         ) : (
                           <>
-                            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                            <img src="/strx.png" className="h-3.5 w-3.5 object-contain shrink-0" alt="" />
                             <span>Run AI Agent</span>
                           </>
                         )}
@@ -299,7 +302,17 @@ const Sidebar = () => {
           {isPmxRoute && (
             <div className="px-1.5 pb-2">
               <button
-                onClick={() => runPipeline()}
+                onClick={() => {
+                  if (selectedSourceIds.length === 0) {
+                    toast({
+                      title: "No sources selected",
+                      description: "Select one or more sources to begin analysis.",
+                      variant: "destructive"
+                    });
+                    return;
+                  }
+                  setShowConfirm(true);
+                }}
                 disabled={loading.pipeline}
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-500 hover:bg-sky-400 px-3 py-2 text-xs font-semibold text-black transition-all disabled:opacity-50"
               >
@@ -310,7 +323,7 @@ const Sidebar = () => {
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                    <img src="/strx.png" className="h-3.5 w-3.5 object-contain shrink-0" alt="" />
                     {!collapsed && <span>Run AI Agent</span>}
                   </>
                 )}
@@ -395,6 +408,90 @@ const Sidebar = () => {
       </motion.aside>
 
       <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
+
+      {/* Pipeline Confirmation Modal */}
+      <AnimatePresence>
+        {showConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md bg-zinc-950 border border-zinc-900 rounded-2xl p-6 shadow-2xl relative"
+            >
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-sky-400">
+                  <img src="/strx.png" className="h-5 w-5 object-contain" alt="" />
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Running PMX Intelligence</h3>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs text-zinc-400 pb-2 border-b border-zinc-900">
+                    <span>Sources Selected:</span>
+                    <span className="font-bold text-white bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+                      {selectedSourceIds.length}
+                    </span>
+                  </div>
+
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 py-2 pr-1 scrollbar-thin">
+                    {inputs.filter((i: any) => selectedSourceIds.includes(i._id)).map((source: any) => (
+                      <div key={source._id} className="flex items-center gap-2 rounded-lg bg-zinc-900/40 border border-zinc-900 px-3 py-2">
+                        <Database className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                        <span className="text-xs text-zinc-300 truncate font-medium">{source.name}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-xl bg-sky-500/5 border border-sky-500/10 p-3.5 mt-2">
+                    <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">Estimated Processing Time</span>
+                    <p className="text-xs text-zinc-300 font-semibold mt-0.5">~45 seconds</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowConfirm(false)}
+                    className="flex-1 rounded-lg border border-zinc-800 hover:bg-zinc-900 py-2.5 text-xs font-semibold text-zinc-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setShowConfirm(false);
+                      try {
+                        window.dispatchEvent(new CustomEvent("pmx-pipeline-started"));
+                        await runPipeline();
+                        window.dispatchEvent(new CustomEvent("pmx-pipeline-completed"));
+                        toast({
+                          title: "Analysis Complete",
+                          description: "Automated PMX pipeline run finished successfully."
+                        });
+                      } catch (err) {
+                        window.dispatchEvent(new CustomEvent("pmx-pipeline-failed"));
+                        toast({
+                          title: "Analysis Failed",
+                          description: "An error occurred during pipeline run.",
+                          variant: "destructive"
+                        });
+                      }
+                    }}
+                    className="flex-1 rounded-lg bg-sky-500 hover:bg-sky-400 py-2.5 text-xs font-bold text-black transition-colors"
+                  >
+                    Start Analysis
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 };

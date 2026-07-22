@@ -12,7 +12,8 @@ import {
   PmxExecutionTaskModel,
   PmxArtifactModel,
   PmxAuditLogModel,
-  PmxScreenshotProjectModel
+  PmxScreenshotProjectModel,
+  PmxSessionModel
 } from "../../../models/Pmx";
 import {
   generateProductUnderstanding,
@@ -52,11 +53,24 @@ async function logAudit(req: AuthenticatedRequest, projectId: string, action: st
 }
 
 // Helper to run full downstream intelligence pipeline
-export async function runDownstreamPipeline(projectId: string, userId: string, req: any) {
-  // Fetch active inputs
-  const inputs = await PmxInputModel.find({ projectId, userId, isDeleted: false });
+export async function runDownstreamPipeline(
+  projectId: string,
+  userId: string,
+  selectedSourceIds: string[] | undefined,
+  req: any
+) {
+  const startTime = Date.now();
+
+  // Fetch active inputs, optionally filtering by selectedSourceIds
+  const query: any = { projectId, userId, isDeleted: false };
+  if (selectedSourceIds && selectedSourceIds.length > 0) {
+    query._id = { $in: selectedSourceIds };
+  }
+
+  const inputs = await PmxInputModel.find(query);
   if (inputs.length === 0) return;
 
+  const actualSelectedIds = inputs.map(i => i._id.toString());
   const textContents = inputs.map(i => `[Source: ${i.name} (${i.type})]\n${i.content || ""}\n${i.summary || ""}`);
 
   // 1. Regenerate Understanding
@@ -97,6 +111,7 @@ export async function runDownstreamPipeline(projectId: string, userId: string, r
     projectId,
     userId,
     ...ev,
+    sourceInputIds: actualSelectedIds,
     isDeleted: false
   }));
   if (evidenceDocs.length > 0) {
@@ -114,6 +129,7 @@ export async function runDownstreamPipeline(projectId: string, userId: string, r
     projectId,
     userId,
     ...prob,
+    sourceInputIds: actualSelectedIds,
     isDeleted: false
   }));
   if (problemDocs.length > 0) {
@@ -143,6 +159,7 @@ export async function runDownstreamPipeline(projectId: string, userId: string, r
       ...opp,
       iceScore,
       riceScore,
+      sourceInputIds: actualSelectedIds,
       isDeleted: false
     };
   });
@@ -158,14 +175,42 @@ export async function runDownstreamPipeline(projectId: string, userId: string, r
     projectId,
     userId,
     ...dec,
+    sourceInputIds: actualSelectedIds,
     isDeleted: false
   }));
   if (decisionDocs.length > 0) {
     await PmxDecisionModel.insertMany(decisionDocs);
   }
 
+  // Save Pipeline Session History
+  const durationMs = Date.now() - startTime;
+  const session = await PmxSessionModel.create({
+    projectId,
+    userId,
+    selectedSourceIds: actualSelectedIds,
+    resultsSummary: {
+      evidenceCount: evidenceDocs.length,
+      problemCount: problemDocs.length,
+      opportunityCount: opportunityDocs.length,
+      decisionCount: decisionDocs.length,
+      solutionCount: 0,
+      taskCount: 0
+    },
+    aiModel: "deepseek-v4-flash",
+    durationMs
+  });
+
   console.log("[PMX Pipeline] Done. Downstream intelligence updated successfully.");
-  await logAudit(req, projectId, "pipeline_run", "Successfully executed the automated AI PM product intelligence pipeline.", "PmxUnderstanding", understanding._id.toString());
+  await logAudit(
+    req,
+    projectId,
+    "pipeline_run",
+    `Successfully executed the automated AI PM product intelligence pipeline (Session: ${session._id.toString()}).`,
+    "PmxSession",
+    session._id.toString()
+  );
+
+  return session;
 }
 
 // ==========================================
@@ -222,11 +267,6 @@ pmxRouter.post("/inputs", async (req: AuthenticatedRequest, res, next) => {
 
     await logAudit(req, projectId, "input_created", `Imported new source: "${name}" (${type})`, "PmxInput", inputNode._id.toString());
 
-    // Run pipeline in background
-    runDownstreamPipeline(projectId, req.userId!, req).catch(err => {
-      console.error("[PMX Route] Background pipeline fail:", err);
-    });
-
     res.json({ success: true, data: inputNode });
   } catch (err) {
     next(err);
@@ -236,12 +276,13 @@ pmxRouter.post("/inputs", async (req: AuthenticatedRequest, res, next) => {
 // Trigger full intelligence processing manually
 pmxRouter.post("/inputs/process", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const { projectId = "default" } = req.body;
+    const { projectId = "default", selectedSourceIds } = req.body;
+    if (!selectedSourceIds || selectedSourceIds.length === 0) {
+      return res.status(400).json({ success: false, error: "No sources selected. Select one or more sources to begin analysis." });
+    }
     
-    // Trigger in foreground so user sees it finish, or returns early
-    await runDownstreamPipeline(projectId, req.userId!, req);
-    
-    res.json({ success: true, message: "Product intelligence pipeline successfully executed." });
+    const session = await runDownstreamPipeline(projectId, req.userId!, selectedSourceIds, req);
+    res.json({ success: true, data: session, message: "Product intelligence pipeline successfully executed." });
   } catch (err) {
     next(err);
   }
@@ -291,10 +332,34 @@ pmxRouter.post("/inputs/:id/reprocess", async (req: AuthenticatedRequest, res, n
 
     await logAudit(req, input.projectId, "input_reprocessed", `Reprocessed source: "${input.name}"`, "PmxInput", input._id.toString());
 
-    // Trigger downstream cascade
-    runDownstreamPipeline(input.projectId, req.userId!, req).catch(err => console.error(err));
+    // Trigger downstream cascade on this single input
+    runDownstreamPipeline(input.projectId, req.userId!, [input._id.toString()], req).catch(err => console.error(err));
 
     res.json({ success: true, data: input });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Get pipeline sessions history
+pmxRouter.get("/history/sessions", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = (req.query.projectId as string) || "default";
+    const sessions = await PmxSessionModel.find({ projectId, userId: req.userId }).sort({ createdAt: -1 });
+    res.json({ success: true, data: sessions });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Rerun a previous pipeline session
+pmxRouter.post("/history/sessions/:id/rerun", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const session = await PmxSessionModel.findOne({ _id: req.params.id, userId: req.userId });
+    if (!session) return res.status(404).json({ success: false, error: "Session not found" });
+
+    const newSession = await runDownstreamPipeline(session.projectId, req.userId!, session.selectedSourceIds, req);
+    res.json({ success: true, data: newSession });
   } catch (err) {
     next(err);
   }

@@ -34,9 +34,6 @@ export const authMiddleware = async (
 
     req.userId = clerkUserId;
 
-    // Check if user exists in MongoDB
-    let existingUser = await UserModel.findOne({ clerkId: clerkUserId });
-
     // Query Clerk to get latest details for either creation or update
     const clerkUser = await clerk.users.getUser(clerkUserId);
     const email = clerkUser.emailAddresses[0]?.emailAddress || '';
@@ -44,6 +41,14 @@ export const authMiddleware = async (
     const firstName = clerkUser.firstName || '';
     const lastName = clerkUser.lastName || '';
     const avatar = clerkUser.imageUrl || '';
+
+    // 1. Search by clerkId
+    let existingUser = await UserModel.findOne({ clerkId: clerkUserId });
+
+    // 2. If not found, search by email
+    if (!existingUser && email) {
+      existingUser = await UserModel.findOne({ email });
+    }
 
     if (!existingUser) {
       console.log('[Clerk Sync] Auto-creating user in MongoDB:', clerkUserId);
@@ -60,14 +65,37 @@ export const authMiddleware = async (
       });
       console.log('[Clerk Sync] Created user successfully:', existingUser._id);
     } else {
-      // "If the user exists: Update profile."
       console.log('[Clerk Sync] Syncing user profile updates:', clerkUserId);
-      existingUser.email = email;
-      existingUser.username = username;
-      existingUser.firstName = firstName;
-      existingUser.lastName = lastName;
-      existingUser.avatar = avatar;
-      await existingUser.save();
+      let hasChanges = false;
+
+      if (existingUser.clerkId !== clerkUserId) {
+        existingUser.clerkId = clerkUserId;
+        hasChanges = true;
+      }
+      if (email && existingUser.email !== email) {
+        existingUser.email = email;
+        hasChanges = true;
+      }
+      if (username && existingUser.username !== username) {
+        existingUser.username = username;
+        hasChanges = true;
+      }
+      if (firstName && existingUser.firstName !== firstName) {
+        existingUser.firstName = firstName;
+        hasChanges = true;
+      }
+      if (lastName && existingUser.lastName !== lastName) {
+        existingUser.lastName = lastName;
+        hasChanges = true;
+      }
+      if (avatar && existingUser.avatar !== avatar) {
+        existingUser.avatar = avatar;
+        hasChanges = true;
+      }
+
+      if (hasChanges) {
+        await existingUser.save();
+      }
     }
 
     req.userRole = existingUser.role;
