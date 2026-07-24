@@ -115,7 +115,7 @@ In the Render Web Service dashboard, navigate to **Environment** → **Add Env V
 | `NODE_ENV` | `production` | Enables production mode |
 | `PORT` | `10000` | Render default web port |
 | `FRONTEND_ORIGIN` | `https://starox.vercel.app` | **Your Vercel live URL** (CORS whitelist) |
-| `MONGO_URI` | `mongodb+srv://...` | **MongoDB Atlas connection URI** from Step 1.4 |
+| `MONGODB_URI` | `mongodb+srv://...` | **MongoDB Atlas connection URI** from Step 1.4 |
 | `CLERK_SECRET_KEY` | `sk_live_...` | **Clerk Production Secret Key** from Step 2.3 |
 | `DEEPSEEK_API_KEY` | `REDACTED_DEEPSEEK_API_KEY` | DeepSeek API authentication key |
 
