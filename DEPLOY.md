@@ -117,7 +117,7 @@ In the Render Web Service dashboard, navigate to **Environment** → **Add Env V
 | `FRONTEND_ORIGIN` | `https://starox.vercel.app` | **Your Vercel live URL** (CORS whitelist) |
 | `MONGODB_URI` | `mongodb+srv://...` | **MongoDB Atlas connection URI** from Step 1.4 |
 | `CLERK_SECRET_KEY` | `sk_live_...` | **Clerk Production Secret Key** from Step 2.3 |
-| `DEEPSEEK_API_KEY` | `REDACTED_DEEPSEEK_API_KEY` | DeepSeek API authentication key |
+| `DEEPSEEK_API_KEY` | Your DeepSeek API key | DeepSeek API authentication key |
 
 ### 3.4 Puppeteer Nixpacks Configuration (Screenshot Captures)
 Render uses **Nixpacks** by default to build Node.js applications. To launch Chromium for screenshot capturing on Render, we need to install system packages.

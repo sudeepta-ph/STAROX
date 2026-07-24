@@ -73,7 +73,7 @@ STAROX/
 PORT=8080
 MONGO_URI=mongodb+srv://...
 CLERK_SECRET_KEY=sk_test_...
-DEEPSEEK_API_KEY=REDACTED_DEEPSEEK_API_KEY
+DEEPSEEK_API_KEY=your_deepseek_api_key
 ```
 
 #### Frontend Env (`Frontend/.env`):

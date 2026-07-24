@@ -1,7 +1,9 @@
 node_modules/
 dist/
-.env
-.env.local
-.env.production
+.env*
+!.env.example
+*.pem
+*.key
+credentials*.json
 *.log
 .DS_Store
