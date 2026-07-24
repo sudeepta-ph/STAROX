@@ -25,6 +25,7 @@ import {
   generateExecutionTasks
 } from "../../../services/pmxAi";
 import { analyzeScreenshotUI } from "../../../services/screenshotAi";
+import { runUIAudit } from "../../../services/uiAuditAi";
 import { screenshotRouter } from "./screenshot";
 import crypto from "node:crypto";
 
@@ -592,6 +593,65 @@ pmxRouter.post("/analysis/generate", async (req: AuthenticatedRequest, res, next
 
     await logAudit(req, projectId, "analysis_generated", `Completed usability flow audit for: ${url}`, "PmxAnalysis", analysisReport._id.toString());
     res.json({ success: true, data: analysisReport });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+// UI INTELLIGENCE AGENT — focused UI/UX-only audit
+// POST /api/pmx/analysis/ui-audit
+// Body:
+//   mode: "initial" | "enhance"          (default: "initial")
+//   url?: string                          live website URL
+//   title?: string                        page label
+//   screenshots?: string[]               base64 dataUrls of uploaded screens
+//   screenshotLabels?: string[]           labels matching each screenshot
+// ──────────────────────────────────────────────────────────────
+pmxRouter.post("/analysis/ui-audit", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const {
+      mode = "initial",
+      url,
+      title,
+      screenshots = [],       // array of base64 dataUrls
+      screenshotLabels = [],  // optional labels per screenshot
+    } = req.body;
+
+    const hasUrl         = !!url;
+    const hasScreenshots = Array.isArray(screenshots) && screenshots.length > 0;
+
+    if (!hasUrl && !hasScreenshots) {
+      return res.status(400).json({ success: false, error: "Provide a URL or at least one screenshot." });
+    }
+
+    // Build context string for the AI
+    // (text models don't receive base64 images — we describe what was provided)
+    const contextParts: string[] = [];
+
+    if (hasUrl) {
+      contextParts.push(`Live website URL: ${url}`);
+      contextParts.push(`Base your findings on known UX patterns for this type of product at that URL.`);
+    }
+
+    if (title) {
+      contextParts.push(`Page title: ${title}`);
+    }
+
+    if (hasScreenshots) {
+      contextParts.push(`\nThe user has uploaded ${screenshots.length} screenshot(s) of the following screens:`);
+      screenshots.forEach((_: string, i: number) => {
+        const label = screenshotLabels[i] || `Screen ${i + 1}`;
+        contextParts.push(`  - Screenshot ${i + 1}: "${label}"`);
+      });
+      contextParts.push(`Analyze each screen individually. Also identify visual inconsistencies across screens.`);
+    }
+
+    const context      = contextParts.join("\n");
+    const auditMode    = (hasScreenshots ? "enhance" : "initial") as "initial" | "enhance";
+    const result       = await runUIAudit(context, auditMode);
+
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

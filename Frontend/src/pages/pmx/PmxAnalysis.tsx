@@ -1,833 +1,861 @@
-import { useState, useEffect } from "react";
-import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
+import { useState, useRef, useEffect } from "react";
+import { getPmxHeaders } from "@/lib/pmxStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  FileText,
-  Upload,
-  Globe,
-  Sliders,
-  Sparkles,
-  ChevronRight,
-  TrendingUp,
-  ArrowRight,
-  Lightbulb,
-  Plus,
-  Play,
-  X,
-  BookOpen,
-  Calendar,
-  Grid,
-  List,
-  Search,
-  Download,
-  Info,
-  ExternalLink,
-  ChevronDown,
-  Trash2
+  Globe, Upload, Sparkles, ChevronDown, ChevronUp,
+  Download, RefreshCw, X, Eye, Layers, Type, Contrast,
+  MousePointer2, Navigation, Layout, Puzzle, Accessibility,
+  Smartphone, GitBranch, Zap, PanelLeftClose, PanelLeftOpen,
+  PanelRightClose, PanelRightOpen, Plus, ImagePlus, Info,
+  History, Clock, Trash2,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import ScreenshotCanvas from "@/components/ScreenshotCanvas";
+import WebsiteViewer from "@/components/WebsiteViewer";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
+const HISTORY_KEY = "ui_audit_history";
+const MAX_HISTORY  = 30;
 
-export default function PmxAnalysis() {
-  const { toast } = useToast();
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-  // Project listings
-  const [projects, setProjects] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [activeProject, setActiveProject] = useState<any | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [projectToDelete, setProjectToDelete] = useState<{ id: string; name: string } | null>(null);
+interface UIIssue {
+  id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  screen: string;
+  category: string;
+  problem: string;
+  change: string;
+  improvement: string;
+}
 
-  // Active workspace states
-  const [activeScreenshotIdx, setActiveScreenshotIdx] = useState(0);
-  const [viewMode, setViewMode] = useState<"visual" | "list">("visual");
+interface AuditResult {
+  pageTitle: string;
+  overallScore: number;
+  summary: string;
+  issues: UIIssue[];
+}
 
-  // New project form states
-  const [newTitle, setNewTitle] = useState("");
-  const [newDesc, setNewDesc] = useState("");
-  const [urlInput, setUrlInput] = useState("");
-  const [uploadedImages, setUploadedImages] = useState<Array<{ title: string; dataUrl: string }>>([]);
-  const [runningCrawl, setRunningCrawl] = useState(false);
-  const [runningUpload, setRunningUpload] = useState(false);
+interface HistoryEntry {
+  id: string;
+  pageTitle: string;
+  overallScore: number;
+  summary: string;
+  issueCount: number;
+  auditSrc: "url" | "screenshot";
+  url?: string;
+  createdAt: string; // ISO string
+  result: AuditResult;
+}
 
-  // Filters for List View
-  const [searchQuery, setSearchQuery] = useState("");
-  const [priorityFilter, setPriorityFilter] = useState("all");
-  const [categoryFilter, setCategoryFilter] = useState("all");
+interface UploadedScreen {
+  dataUrl: string;
+  label: string;
+}
 
-  // Load projects list
-  const loadProjects = async () => {
-    setLoading(true);
-    try {
-      const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/screenshot-intelligence`, { headers });
-      const json = await res.json();
-      if (json.success) {
-        setProjects(json.data);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-  // Load single project detail
-  const loadProjectDetail = async (id: string) => {
-    try {
-      const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/screenshot-intelligence/${id}`, { headers });
-      const json = await res.json();
-      if (json.success) {
-        setActiveProject(json.data);
-        if (json.data.screenshots?.length > 0) {
-          setActiveScreenshotIdx(0);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
+const SEVERITY_META = {
+  critical: { label: "Critical", color: "text-red-400",    bg: "bg-red-500/10 border-red-500/20",       dot: "bg-red-400"    },
+  high:     { label: "High",     color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/20", dot: "bg-orange-400" },
+  medium:   { label: "Medium",   color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20", dot: "bg-yellow-400" },
+  low:      { label: "Low",      color: "text-sky-400",    bg: "bg-sky-500/10 border-sky-500/20",       dot: "bg-sky-400"    },
+};
 
-  useEffect(() => {
-    loadProjects();
-  }, []);
+const CATEGORY_ICONS: Record<string, any> = {
+  "Visual Hierarchy":             Eye,
+  "Spacing & Alignment":          Layers,
+  "Typography":                   Type,
+  "Color & Contrast":             Contrast,
+  "CTA Placement":                MousePointer2,
+  "Navigation":                   Navigation,
+  "Layout Balance":               Layout,
+  "Component Consistency":        Puzzle,
+  "Accessibility":                Accessibility,
+  "Responsiveness":               Smartphone,
+  "User Flow":                    GitBranch,
+  "Usability Friction":           Zap,
+  "Cross-Screen Inconsistencies": Layers,
+};
 
-  useEffect(() => {
-    if (activeProjectId) {
-      loadProjectDetail(activeProjectId);
-    } else {
-      setActiveProject(null);
-    }
-  }, [activeProjectId]);
+function scoreColor(s: number) { return s >= 75 ? "text-green-400" : s >= 50 ? "text-yellow-400" : "text-red-400"; }
+function scoreLabel(s: number) { return s >= 80 ? "Good" : s >= 60 ? "Needs Work" : s >= 40 ? "Poor" : "Critical Issues"; }
 
-  // Handle Drag & Drop / File select upload conversion
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    processFiles(files);
-  };
+function fmtDate(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " · " +
+         d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
 
-  const processFiles = (files: FileList) => {
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setUploadedImages((prev) => [
-            ...prev,
-            {
-              title: file.name.split(".")[0],
-              dataUrl: event.target!.result as string
-            }
-          ]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
-  };
+// ── History helpers ───────────────────────────────────────────────────────────
 
-  // Handle clipboard Ctrl+V image paste
-  const handlePaste = (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    Array.from(items).forEach((item) => {
-      if (item.type.indexOf("image") !== -1) {
-        const file = item.getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            if (event.target?.result) {
-              setUploadedImages((prev) => [
-                ...prev,
-                {
-                  title: `Clipboard Image ${new Date().toLocaleTimeString()}`,
-                  dataUrl: event.target!.result as string
-                }
-              ]);
-              toast({
-                title: "Image pasted from clipboard",
-                description: "Appended screenshot to upload deck."
-              });
-            }
-          };
-          reader.readAsDataURL(file);
-        }
-      }
-    });
-  };
+function loadHistory(): HistoryEntry[] {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
+  catch { return []; }
+}
 
-  // Submit screenshots upload
-  const handleUploadSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (uploadedImages.length === 0 || !newTitle.trim()) return;
+function saveHistory(entries: HistoryEntry[]) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(entries.slice(0, MAX_HISTORY)));
+}
 
-    setRunningUpload(true);
-    toast({
-      title: "Compiling screenshot workspace...",
-      description: "AI is scanning visual patterns to map interface annotations."
-    });
+function pushHistory(entry: HistoryEntry) {
+  const existing = loadHistory().filter(e => e.id !== entry.id);
+  saveHistory([entry, ...existing]);
+}
 
-    try {
-      const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/screenshot-intelligence`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          title: newTitle,
-          description: newDesc,
-          screenshots: uploadedImages
-        })
-      });
+// ── ScoreRing ─────────────────────────────────────────────────────────────────
 
-      const json = await res.json();
-      if (json.success) {
-        toast({
-          title: "Visual Analysis Ready",
-          description: `Logged feedback workspace for: ${newTitle}`
-        });
-        setNewTitle("");
-        setNewDesc("");
-        setUploadedImages([]);
-        loadProjects();
-        setActiveProjectId(json.data._id);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setRunningUpload(false);
-    }
-  };
+function ScoreRing({ score, size = 14 }: { score: number; size?: number }) {
+  const r = size * 0.78, circ = 2 * Math.PI * r, filled = (score / 100) * circ;
+  const px = size * 4;
+  return (
+    <div className="relative flex items-center justify-center shrink-0" style={{ width: px, height: px }}>
+      <svg className="-rotate-90" width={px} height={px} viewBox={`0 0 ${px} ${px}`}>
+        <circle cx={px/2} cy={px/2} r={r} fill="none" stroke="#27272a" strokeWidth={size * 0.35} />
+        <circle cx={px/2} cy={px/2} r={r} fill="none"
+          stroke={score >= 75 ? "#4ade80" : score >= 50 ? "#facc15" : "#f87171"}
+          strokeWidth={size * 0.35} strokeDasharray={`${filled} ${circ}`} strokeLinecap="round" />
+      </svg>
+      <span className={`absolute font-black ${scoreColor(score)}`} style={{ fontSize: size * 0.85 }}>{score}</span>
+    </div>
+  );
+}
 
-  // Run audit directly from live URL (Puppeteer browser capture)
-  const handleUrlCrawlSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!urlInput.trim()) return;
+// ── IssueCard ─────────────────────────────────────────────────────────────────
 
-    setRunningCrawl(true);
-    toast({
-      title: "Launching browser crawler...",
-      description: "Taking full-screen UI snapshot of application homepage."
-    });
-
-    try {
-      // 1. Get browser screenshot base64 from backend capture endpoint
-      const headers = await getPmxHeaders();
-      const capRes = await fetch(`${API_URL}/pmx/screenshot`, {
-        method: "POST",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ url: urlInput, fullPage: false })
-      });
-      const capJson = await capRes.json();
-      
-      if (!capJson.success || !capJson.dataUrl) {
-        throw new Error(capJson.error || "Capture failed");
-      }
-
-      // 2. Submit captured screenshot base64 to screenshot intelligence workspace
-      const res = await fetch(`${API_URL}/pmx/screenshot-intelligence`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          title: `Direct URL Audit: ${new URL(urlInput).hostname}`,
-          description: `Usability snapshot taken on URL page: ${urlInput}`,
-          screenshots: [{ title: "Landing Page View", dataUrl: capJson.dataUrl }]
-        })
-      });
-
-      const json = await res.json();
-      if (json.success) {
-        toast({
-          title: "URL snapshot analyzed",
-          description: "Visual design review canvas workspace is now ready."
-        });
-        setUrlInput("");
-        loadProjects();
-        setActiveProjectId(json.data._id);
-      }
-    } catch (err) {
-      console.error(err);
-      toast({
-        variant: "destructive",
-        title: "URL capture failed",
-        description: "Verify that server is online and URL is publicly active."
-      });
-    } finally {
-      setRunningCrawl(false);
-    }
-  };
-
-  // Add screenshot to existing project workspace
-  const handleAppendScreenshot = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || !activeProject) return;
-
-    const file = files[0];
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      if (event.target?.result) {
-        toast({
-          title: "Analyzing screenshot...",
-          description: "AI is crawling layout elements."
-        });
-        
-        try {
-          const headers = await getPmxHeaders();
-          const capRes = await fetch(`${API_URL}/pmx/screenshot-intelligence`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              title: activeProject.title,
-              description: activeProject.description,
-              screenshots: [
-                ...activeProject.screenshots.map((s: any) => ({ title: s.title, dataUrl: s.dataUrl })),
-                { title: file.name.split(".")[0], dataUrl: event.target!.result as string }
-              ]
-            })
-          });
-          const capJson = await capRes.json();
-          if (capJson.success) {
-            toast({
-              title: "Screenshot appended",
-              description: `Uploaded additional deck: ${file.name}`
-            });
-            loadProjectDetail(activeProject._id);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  // Delete project review workspace
-  const executeDeleteProject = async (id: string, name: string) => {
-    try {
-      const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/screenshot-intelligence/${id}`, {
-        method: "DELETE",
-        headers
-      });
-      const json = await res.json();
-      if (json.success) {
-        toast({
-          title: "Workspace deleted",
-          description: `Removed "${name}".`
-        });
-        loadProjects();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const handleDeleteProject = (id: string, name: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setProjectToDelete({ id, name });
-    setDeleteConfirmOpen(true);
-  };
-
-  // Export report downloads (Markdown / JSON)
-  const handleExport = (format: "markdown" | "json") => {
-    if (!activeProject) return;
-
-    let fileContent = "";
-    let fileExtension = "md";
-
-    if (format === "json") {
-      fileContent = JSON.stringify(activeProject, null, 2);
-      fileExtension = "json";
-    } else {
-      fileContent = `# Executive Summary: UI Visual review report for "${activeProject.title}"\n\n`;
-      fileContent += `${activeProject.description || ""}\n\n`;
-      fileContent += `## Visual Usability Observations\n`;
-      activeProject.screenshots.forEach((s: any) => {
-        fileContent += `### Screenshot: ${s.title}\n`;
-        s.annotations.forEach((a: any) => {
-          fileContent += `- **[${a.category}] [${a.priority.toUpperCase()}] ${a.title}** (x: ${a.x.toFixed(1)}%, y: ${a.y.toFixed(1)}%)\n`;
-          fileContent += `  - **Description:** ${a.description}\n`;
-          fileContent += `  - **Suggested Fix:** ${a.recommendation}\n`;
-          fileContent += `  - **Impact:** ${a.expectedImpact}\n\n`;
-        });
-      });
-    }
-
-    const blob = new Blob([fileContent], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${activeProject.title.toLowerCase().replace(/\s+/g, "_")}_report.${fileExtension}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  // Render components
-  const currentScreenshot = activeProject?.screenshots?.[activeScreenshotIdx];
-  const listAnnotations = currentScreenshot?.annotations.filter((a: any) => {
-    const titleLower = (a.title || "").toLowerCase();
-    const descLower = (a.description || "").toLowerCase();
-    const matchesSearch = titleLower.includes(searchQuery.toLowerCase()) || descLower.includes(searchQuery.toLowerCase());
-    const matchesPriority = priorityFilter === "all" || a.priority === priorityFilter;
-    const matchesCategory = categoryFilter === "all" || a.category === categoryFilter;
-    return matchesSearch && matchesPriority && matchesCategory;
-  }) || [];
+function IssueCard({ issue, index }: { issue: UIIssue; index: number }) {
+  const [open, setOpen] = useState(false);
+  const meta = SEVERITY_META[issue.severity] || SEVERITY_META.low;
+  const Icon = CATEGORY_ICONS[issue.category] || Zap;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6 pb-16" onPaste={handlePaste}>
-      
-      {/* ── HEADER TITLE ── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-900 pb-5">
-        <div>
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-sky-400" /> Screenshot Intelligence Workspace
-          </h1>
-          <p className="text-xs text-zinc-500 mt-1">
-            Figma-style visual review board overlaying AI observations directly onto mockups, wireframes, and live capture screenshots.
-          </p>
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.03 }}
+      className={`rounded-xl border ${meta.bg} overflow-hidden`}
+    >
+      <button onClick={() => setOpen(o => !o)}
+        className="w-full flex items-start gap-3 p-3.5 text-left hover:bg-white/[0.02] transition-colors"
+      >
+        <span className="shrink-0 w-5 h-5 rounded-full bg-zinc-800 text-[9px] font-bold text-zinc-400 flex items-center justify-center mt-0.5">
+          {index + 1}
+        </span>
+        <span className={`shrink-0 mt-0.5 ${meta.color}`}><Icon className="h-3.5 w-3.5" /></span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-xs font-semibold text-white leading-tight">{issue.title}</h3>
+            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${meta.bg} ${meta.color}`}>
+              {meta.label}
+            </span>
+          </div>
+          <p className="text-[10px] text-zinc-500 mt-0.5 font-mono truncate">{issue.screen} · {issue.category}</p>
         </div>
+        <span className="shrink-0 text-zinc-600 mt-0.5">
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </span>
+      </button>
 
-        {activeProject && (
-          <button
-            onClick={() => setActiveProjectId(null)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-zinc-800 text-xs text-zinc-400 hover:text-white transition-colors self-start"
-          >
-            ← Back to workspaces
-          </button>
-        )}
-      </div>
-
-      {/* ── WORKSPACE BOARD MAIN PANEL ── */}
-      {activeProject ? (
-        <div className="flex flex-col lg:flex-row gap-6 h-[calc(100vh-14rem)] min-h-[650px] relative overflow-hidden">
-          
-          {/* A. THUMBNAIL SIDEBAR */}
-          <div className="w-full lg:w-60 border border-zinc-900 rounded-xl bg-zinc-950 p-4 flex flex-col shrink-0 overflow-y-auto scrollbar-thin space-y-4">
-            <div className="flex justify-between items-center pb-2 border-b border-zinc-900">
-              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">Project Screens</span>
-              <label className="p-1 rounded bg-sky-500 hover:bg-sky-400 text-black cursor-pointer transition-colors" title="Append screenshot to deck">
-                <Plus className="h-3.5 w-3.5" />
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleAppendScreenshot}
-                  className="hidden"
-                />
-              </label>
-            </div>
-
-            <div className="space-y-2 flex-1">
-              {activeProject.screenshots.map((s: any, i: number) => {
-                const active = activeScreenshotIdx === i;
-                return (
-                  <button
-                    key={s.id}
-                    onClick={() => setActiveScreenshotIdx(i)}
-                    className={`w-full p-2 rounded-lg border text-left flex gap-3 items-center transition-all ${
-                      active
-                        ? "bg-[#18181b] border-sky-500/25 text-white"
-                        : "bg-transparent border-transparent text-zinc-400 hover:bg-zinc-900/30"
-                    }`}
-                  >
-                    <div className="w-10 h-10 rounded border border-zinc-900 bg-zinc-900 overflow-hidden flex items-center justify-center shrink-0">
-                      <img src={s.dataUrl} className="max-w-full max-h-full object-cover" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-semibold truncate leading-tight">{s.title}</p>
-                      <span className="text-[9px] text-zinc-500 font-mono mt-0.5 block">{s.annotations.length} pins</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Export options */}
-            <div className="pt-3 border-t border-zinc-900 space-y-2 shrink-0">
-              <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">Export workspace</span>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => handleExport("markdown")}
-                  className="flex items-center justify-center gap-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 py-1.5 text-[10px] font-semibold text-zinc-300 transition-colors"
-                >
-                  <Download className="h-3 w-3" />
-                  <span>MD Spec</span>
-                </button>
-                <button
-                  onClick={() => handleExport("json")}
-                  className="flex items-center justify-center gap-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 py-1.5 text-[10px] font-semibold text-zinc-300 transition-colors"
-                >
-                  <Download className="h-3 w-3" />
-                  <span>JSON</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* B. MAIN CANVAS WORKSPACE VIEW */}
-          <div className="flex-1 flex flex-col overflow-hidden relative border border-zinc-900 rounded-xl bg-zinc-950/20">
-            
-            {/* View Selector header bar */}
-            <div className="h-14 border-b border-zinc-900 px-4 flex justify-between items-center bg-zinc-950 shrink-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-xs font-bold text-white leading-tight">{activeProject.title}</h2>
-                <span className="text-[9px] text-zinc-500 font-mono hidden sm:inline">— {activeProject.description || "Design review session"}</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Visual / List mode toggles */}
-                <div className="flex rounded-lg border border-zinc-800 p-0.5 bg-zinc-900/40">
-                  <button
-                    onClick={() => setViewMode("visual")}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-semibold transition-all ${
-                      viewMode === "visual"
-                        ? "bg-[#18181b] text-sky-400"
-                        : "text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    <Grid className="h-3.5 w-3.5" />
-                    <span>Visual Review</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode("list")}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[10px] font-semibold transition-all ${
-                      viewMode === "list"
-                        ? "bg-[#18181b] text-sky-400"
-                        : "text-zinc-500 hover:text-zinc-300"
-                    }`}
-                  >
-                    <List className="h-3.5 w-3.5" />
-                    <span>List View</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Content view renderer */}
-            {currentScreenshot ? (
-              <div className="flex-1 flex overflow-hidden">
-                {viewMode === "visual" ? (
-                  <ScreenshotCanvas
-                    screenshot={currentScreenshot}
-                    projectId={activeProject.projectId}
-                    activeProjectId={activeProject._id}
-                    onRefresh={() => loadProjectDetail(activeProject._id)}
-                  />
-                ) : (
-                  // List Mode
-                  <div className="flex-1 flex flex-col overflow-hidden p-6 space-y-4">
-                    {/* Search & Filters */}
-                    <div className="flex flex-col sm:flex-row gap-3 items-center">
-                      <div className="relative flex-1 w-full">
-                        <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-600" />
-                        <input
-                          type="text"
-                          placeholder="Search annotations..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="w-full bg-[#18181b] border border-zinc-850 focus:border-zinc-800 rounded-lg pl-9 pr-4 py-2 text-xs text-white focus:outline-none"
-                        />
-                      </div>
-                      <div className="flex gap-2 w-full sm:w-auto self-start">
-                        <select
-                          value={priorityFilter}
-                          onChange={(e) => setPriorityFilter(e.target.value)}
-                          className="bg-[#18181b] border border-zinc-850 rounded-lg px-2.5 py-2 text-xs text-zinc-400 focus:outline-none"
-                        >
-                          <option value="all">All Priorities</option>
-                          {["critical", "high", "medium", "low", "suggestion", "improvement"].map(p => (
-                            <option key={p} value={p}>{p.toUpperCase()}</option>
-                          ))}
-                        </select>
-                        <select
-                          value={categoryFilter}
-                          onChange={(e) => setCategoryFilter(e.target.value)}
-                          className="bg-[#18181b] border border-zinc-850 rounded-lg px-2.5 py-2 text-xs text-zinc-400 focus:outline-none"
-                        >
-                          <option value="all">All Categories</option>
-                          {["UX", "UI", "Accessibility", "Visual Hierarchy", "Spacing", "Content", "Interaction"].map(c => (
-                            <option key={c} value={c}>{c}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* Table of issues */}
-                    <div className="flex-1 border border-zinc-900 rounded-xl bg-zinc-950/20 overflow-y-auto scrollbar-thin">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b border-zinc-900 bg-zinc-950 text-zinc-400 font-semibold font-mono">
-                            <th className="p-3.5">Observation details</th>
-                            <th className="p-3.5">Category</th>
-                            <th className="p-3.5">Severity</th>
-                            <th className="p-3.5">Location Coordinate</th>
-                            <th className="p-3.5">Recommendation Fix</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-zinc-900/50">
-                          {listAnnotations.map((ann: any) => (
-                            <tr key={ann.id} className="hover:bg-zinc-900/10">
-                              <td className="p-3.5">
-                                <h4 className="font-bold text-white">{ann.title}</h4>
-                                <p className="text-[10px] text-zinc-500 mt-0.5 line-clamp-1">{ann.description}</p>
-                              </td>
-                              <td className="p-3.5">
-                                <span className="font-mono text-zinc-300 font-bold">{ann.category}</span>
-                              </td>
-                              <td className="p-3.5">
-                                <span className="font-mono text-sky-400 uppercase font-bold">{ann.priority}</span>
-                              </td>
-                              <td className="p-3.5 font-mono text-zinc-500">
-                                ({ann.x.toFixed(1)}%, {ann.y.toFixed(1)}%)
-                              </td>
-                              <td className="p-3.5 text-zinc-400">{ann.recommendation}</td>
-                            </tr>
-                          ))}
-
-                          {listAnnotations.length === 0 && (
-                            <tr>
-                              <td colSpan={5} className="text-center py-20 text-zinc-600 italic">
-                                No observations match current filter criteria.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 italic text-xs">
-                No screenshots inside review deck. Click plus button on sidebar to upload.
-              </div>
-            )}
-          </div>
-
-        </div>
-      ) : (
-        // ── WELCOME REVIEW WORKSPACES LISTING SCREEN ──
-        <div className="space-y-6">
-          {/* Direct URL snapshot trigger */}
-          <div className="rounded-xl border border-zinc-900 bg-zinc-950 p-5 relative overflow-hidden">
-            <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_65%_at_0%_0%,rgba(56,189,248,0.04)_0%,transparent_50%)]" />
-            <h3 className="text-xs font-bold text-white mb-2 flex items-center gap-1.5">
-              <Globe className="h-4 w-4 text-sky-400" /> Snapshot Live URL UI
-            </h3>
-            
-            <form onSubmit={handleUrlCrawlSubmit} className="flex gap-2.5 max-w-3xl">
-              <input
-                type="url"
-                required
-                placeholder="Enter live web app address (e.g. https://myproduct.com)..."
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                className="flex-1 bg-[#18181b] border border-zinc-800 focus:border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
-              />
-              <button
-                type="submit"
-                disabled={runningCrawl}
-                className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 px-4 py-2 text-xs font-semibold text-black transition-all disabled:opacity-50"
-              >
-                {runningCrawl ? (
-                  <>
-                    <div className="h-3 w-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                    <span>Snapping UI...</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-3 w-3 fill-black text-black" />
-                    <span>Take Screenshot & Audit</span>
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* Create new review workspace (Upload Files / Paste) */}
-            <div className="lg:col-span-1 rounded-xl border border-zinc-900 bg-zinc-950 p-5 space-y-4">
-              <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                <Upload className="h-4 w-4 text-sky-400" /> Start Visual Review Board
-              </h3>
-
-              <form onSubmit={handleUploadSubmit} className="space-y-3.5">
-                <div>
-                  <label className="block text-[10px] text-zinc-500 uppercase font-bold mb-1">Board Workspace Title</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="E.g. Pricing Page Checkout UX Audit"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    className="w-full bg-[#18181b] border border-zinc-800 focus:border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-[10px] text-zinc-500 uppercase font-bold mb-1">Optional Description</label>
-                  <textarea
-                    rows={2}
-                    placeholder="E.g. Reviewing visual design drop-offs..."
-                    value={newDesc}
-                    onChange={(e) => setNewDesc(e.target.value)}
-                    className="w-full bg-[#18181b] border border-zinc-800 focus:border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none resize-none"
-                  />
-                </div>
-
-                {/* Drag / Drop visual file dropzone */}
-                <div className="border-2 border-dashed border-zinc-800 hover:border-zinc-700 rounded-xl p-6 text-center cursor-pointer transition-all hover:bg-zinc-900/10 relative">
-                  <input
-                    type="file"
-                    multiple
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                  />
-                  <Upload className="h-6 w-6 text-zinc-500 mx-auto mb-2" />
-                  <p className="text-[10px] text-zinc-400 font-semibold">Drag & Drop screenshots here, or click to browse</p>
-                  <p className="text-[9px] text-zinc-600 mt-1 font-mono">Supports PNG, JPG, JPEG, WEBP or Paste directly (Ctrl+V)</p>
-                </div>
-
-                {/* Uploaded deck list preview */}
-                {uploadedImages.length > 0 && (
-                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                    <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">Images loaded ({uploadedImages.length}):</span>
-                    {uploadedImages.map((img, idx) => (
-                      <div key={idx} className="flex justify-between items-center text-[10px] bg-zinc-900/50 p-1.5 rounded border border-zinc-900">
-                        <span className="truncate max-w-[150px] font-medium text-zinc-300">{img.title}</span>
-                        <button
-                          type="button"
-                          onClick={() => setUploadedImages(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-400 hover:text-red-300"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={runningUpload || uploadedImages.length === 0}
-                  className="w-full bg-sky-500 text-black font-bold rounded-lg px-4 py-2 text-xs hover:bg-sky-400 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
-                >
-                  {runningUpload ? (
-                    <>
-                      <div className="h-3 w-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
-                      <span>Reviewing visual layout...</span>
-                    </>
-                  ) : (
-                    <span>Create Board & Analyze</span>
-                  )}
-                </button>
-              </form>
-            </div>
-
-            {/* List of active workspaces */}
-            <div className="lg:col-span-2 rounded-xl border border-zinc-900 bg-zinc-950 p-5 space-y-4">
-              <h3 className="text-xs font-bold text-white flex items-center gap-1.5 border-b border-zinc-900 pb-3">
-                Active Visual Review Workspaces
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[400px] overflow-y-auto scrollbar-thin">
-                {projects.map((proj) => (
-                  <div
-                    key={proj._id}
-                    onClick={() => setActiveProjectId(proj._id)}
-                    className="glass-card hover-lift p-4 flex flex-col justify-between cursor-pointer space-y-4"
-                  >
-                    <div className="space-y-1.5">
-                      <h4 className="text-xs font-bold text-white">{proj.title}</h4>
-                      <p className="text-[10px] text-zinc-500 leading-relaxed line-clamp-2">{proj.description || "Review board layout."}</p>
-                    </div>
-
-                    <div className="flex justify-between items-center pt-2 border-t border-zinc-900 text-[10px]">
-                      <div className="flex gap-2 text-zinc-500 font-mono">
-                        <span>{proj.screenshots?.length || 0} screens</span>
-                        <span>•</span>
-                        <span>{proj.screenshots?.reduce((acc: number, cur: any) => acc + (cur.annotations?.length || 0), 0) || 0} notes</span>
-                      </div>
-                      <button
-                        onClick={(e) => handleDeleteProject(proj._id, proj.title, e)}
-                        className="text-zinc-600 hover:text-red-400 transition-colors"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-
-                {projects.length === 0 && !loading && (
-                  <div className="col-span-2 text-center py-20 text-zinc-600 italic text-xs">
-                    No active visual review boards. Drag & drop files or type a URL above to start.
-                  </div>
-                )}
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* ── STYLED DELETE CONFIRMATION MODAL ── */}
       <AnimatePresence>
-        {deleteConfirmOpen && projectToDelete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+        {open && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden"
           >
-            <motion.div
-              initial={{ scale: 0.95, y: 15 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 15 }}
-              className="bg-zinc-950 border border-zinc-900 rounded-xl p-5 w-full max-w-sm space-y-4 shadow-2xl"
-            >
-              <div className="space-y-1.5">
-                <h4 className="text-xs font-bold text-white">Delete Review Workspace</h4>
-                <p className="text-[10px] text-zinc-400 leading-relaxed">
-                  Are you sure you want to delete workspace <span className="text-white font-semibold">"{projectToDelete.name}"</span>? This will permanently remove this visual review board.
-                </p>
+            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-white/5">
+              <div>
+                <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Problem</span>
+                <p className="text-[11px] text-zinc-300 mt-1 leading-relaxed">{issue.problem}</p>
               </div>
-
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeleteConfirmOpen(false);
-                    setProjectToDelete(null);
-                  }}
-                  className="flex-1 border border-zinc-800 hover:bg-zinc-900 rounded-lg py-1.5 text-xs text-zinc-400 font-semibold transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (projectToDelete) {
-                      await executeDeleteProject(projectToDelete.id, projectToDelete.name);
-                    }
-                    setDeleteConfirmOpen(false);
-                    setProjectToDelete(null);
-                  }}
-                  className="flex-1 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg py-1.5 text-xs transition-colors"
-                >
-                  Delete Board
-                </button>
+              <div>
+                <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">What to change</span>
+                <p className="text-[11px] text-sky-300 mt-1 leading-relaxed">{issue.change}</p>
               </div>
-            </motion.div>
+              <div>
+                <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-500">Expected improvement</span>
+                <p className="text-[11px] text-green-300 mt-1 leading-relaxed">{issue.improvement}</p>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+    </motion.div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export default function PmxAnalysis() {
+  const { toast } = useToast();
+  const fileRef        = useRef<HTMLInputElement>(null);
+  const enhanceFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Input state ───────────────────────────────────────────────────────────
+  const [urlInput,      setUrlInput]      = useState("");
+  const [previewUrl,    setPreviewUrl]    = useState("");
+  const [activeTab,     setActiveTab]     = useState<"url" | "upload">("url");
+  const [uploadedImage, setUploadedImage] = useState<UploadedScreen | null>(null);
+
+  // ── Enhancement ───────────────────────────────────────────────────────────
+  const [enhanceScreens,   setEnhanceScreens]   = useState<UploadedScreen[]>([]);
+  const [showEnhancePanel, setShowEnhancePanel] = useState(false);
+  const [enhancing,        setEnhancing]        = useState(false);
+
+  // ── Audit state ───────────────────────────────────────────────────────────
+  const [running,  setRunning]  = useState(false);
+  const [result,   setResult]   = useState<AuditResult | null>(null);
+  const [auditSrc, setAuditSrc] = useState<"url" | "screenshot" | null>(null);
+
+  // ── Filters ───────────────────────────────────────────────────────────────
+  const [severityFilter, setSeverityFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+
+  // ── Right panel tab: "analysis" | "history" ───────────────────────────────
+  const [rightTab, setRightTab] = useState<"analysis" | "history">("analysis");
+
+  // ── History ───────────────────────────────────────────────────────────────
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory());
+
+  // ── Panel state ───────────────────────────────────────────────────────────
+  const [panelState, setPanelState] = useState<"both" | "left-collapsed" | "right-collapsed">("both");
+  const collapseLeft  = () => setPanelState("left-collapsed");
+  const collapseRight = () => setPanelState("right-collapsed");
+  const expandBoth    = () => setPanelState("both");
+
+  // ── File helpers ──────────────────────────────────────────────────────────
+
+  const readFileAsDataUrl = (file: File): Promise<string> =>
+    new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload  = e => res(e.target!.result as string);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+
+  const handleInitialFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedImage({ dataUrl: await readFileAsDataUrl(file), label: file.name.replace(/\.[^.]+$/, "") });
+  };
+
+  const handleEnhanceFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const screens = await Promise.all(files.map(async f => ({ dataUrl: await readFileAsDataUrl(f), label: f.name.replace(/\.[^.]+$/, "") })));
+    setEnhanceScreens(prev => [...prev, ...screens]);
+    e.target.value = "";
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    Array.from(e.clipboardData?.items ?? []).forEach(item => {
+      if (item.type.indexOf("image") !== -1) {
+        const file = item.getAsFile();
+        if (!file) return;
+        readFileAsDataUrl(file).then(dataUrl => {
+          if (result) {
+            setEnhanceScreens(prev => [...prev, { dataUrl, label: "Pasted screenshot" }]);
+            setShowEnhancePanel(true);
+            toast({ title: "Screenshot queued", description: "Click Improve Analysis to update." });
+          } else {
+            setUploadedImage({ dataUrl, label: "Pasted screenshot" });
+            setActiveTab("upload");
+            toast({ title: "Screenshot pasted", description: "Ready to audit." });
+          }
+        });
+      }
+    });
+  };
+
+  // ── Persist result to history ─────────────────────────────────────────────
+
+  const persistToHistory = (res: AuditResult, src: "url" | "screenshot", url?: string) => {
+    const entry: HistoryEntry = {
+      id:          crypto.randomUUID(),
+      pageTitle:   res.pageTitle,
+      overallScore: res.overallScore,
+      summary:     res.summary,
+      issueCount:  res.issues.length,
+      auditSrc:    src,
+      url,
+      createdAt:   new Date().toISOString(),
+      result:      res,
+    };
+    pushHistory(entry);
+    setHistory(loadHistory());
+    return entry;
+  };
+
+  // ── Initial audit ─────────────────────────────────────────────────────────
+
+  const runAudit = async () => {
+    const isUrl = activeTab === "url";
+    if (isUrl && !urlInput.trim()) return;
+    if (!isUrl && !uploadedImage) return;
+
+    setRunning(true);
+    setResult(null);
+    setEnhanceScreens([]);
+    setShowEnhancePanel(false);
+    setRightTab("analysis");
+
+    try {
+      const headers = await getPmxHeaders();
+      const body: any = {};
+      const src: "url" | "screenshot" = isUrl ? "url" : "screenshot";
+
+      if (isUrl) {
+        body.url   = urlInput.trim();
+        body.title = urlInput.trim();
+        setPreviewUrl(urlInput.trim());
+      } else if (uploadedImage) {
+        body.screenshots      = [uploadedImage.dataUrl];
+        body.screenshotLabels = [uploadedImage.label];
+        body.title            = uploadedImage.label;
+      }
+
+      setAuditSrc(src);
+
+      const res  = await fetch(`${API_URL}/pmx/analysis/ui-audit`, { method: "POST", headers, body: JSON.stringify(body) });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Audit failed");
+
+      setResult(json.data);
+      persistToHistory(json.data, src, isUrl ? urlInput.trim() : undefined);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Audit failed", description: err.message });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  // ── Enhancement run ───────────────────────────────────────────────────────
+
+  const runEnhancement = async () => {
+    if (!enhanceScreens.length) return;
+    setEnhancing(true);
+
+    try {
+      const headers = await getPmxHeaders();
+      const body: any = {
+        url:              previewUrl || undefined,
+        title:            result?.pageTitle,
+        screenshots:      enhanceScreens.map(s => s.dataUrl),
+        screenshotLabels: enhanceScreens.map(s => s.label),
+      };
+
+      const res  = await fetch(`${API_URL}/pmx/analysis/ui-audit`, { method: "POST", headers, body: JSON.stringify(body) });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Enhancement failed");
+
+      setResult(json.data);
+      setEnhanceScreens([]);
+      setShowEnhancePanel(false);
+      persistToHistory(json.data, auditSrc ?? "url", previewUrl || undefined);
+      toast({ title: "Analysis updated", description: `${json.data.issues.length} issues found across all screens.` });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Enhancement failed", description: err.message });
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
+  // ── Export ────────────────────────────────────────────────────────────────
+
+  const handleExport = (r?: AuditResult) => {
+    const data = r || result;
+    if (!data) return;
+    let md = `# UI Audit: ${data.pageTitle}\n\n**Score:** ${data.overallScore}/100 — ${scoreLabel(data.overallScore)}\n\n**Summary:** ${data.summary}\n\n---\n\n`;
+    data.issues.forEach((iss, i) => {
+      md += `### ${i + 1}. [${iss.severity.toUpperCase()}] ${iss.title}\n- **Screen:** ${iss.screen}\n- **Category:** ${iss.category}\n- **Problem:** ${iss.problem}\n- **Change:** ${iss.change}\n- **Improvement:** ${iss.improvement}\n\n`;
+    });
+    const blob = new Blob([md], { type: "text/plain;charset=utf-8" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `ui-audit-${Date.now()}.md`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  const deleteHistoryEntry = (id: string) => {
+    const updated = loadHistory().filter(e => e.id !== id);
+    saveHistory(updated);
+    setHistory(updated);
+  };
+
+  const clearHistory = () => { saveHistory([]); setHistory([]); };
+
+  const restoreFromHistory = (entry: HistoryEntry) => {
+    setResult(entry.result);
+    setAuditSrc(entry.auditSrc);
+    if (entry.url) { setUrlInput(entry.url); setPreviewUrl(entry.url); setActiveTab("url"); }
+    setEnhanceScreens([]);
+    setShowEnhancePanel(false);
+    setRightTab("analysis");
+  };
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+
+  const allCategories  = result ? [...new Set(result.issues.map(i => i.category))].sort() : [];
+  const filteredIssues = result ? result.issues.filter(i =>
+    (severityFilter === "all" || i.severity === severityFilter) &&
+    (categoryFilter === "all" || i.category === categoryFilter)
+  ) : [];
+  const severityCounts = result
+    ? Object.fromEntries((["critical","high","medium","low"] as const).map(s => [s, result.issues.filter(i => i.severity === s).length]))
+    : null;
+
+  const leftWidth  = panelState === "left-collapsed"  ? "w-0 opacity-0 pointer-events-none"
+                   : panelState === "right-collapsed" ? "flex-1" : "w-1/2";
+  const rightWidth = panelState === "right-collapsed" ? "w-0 opacity-0 pointer-events-none"
+                   : panelState === "left-collapsed"  ? "flex-1" : "w-1/2";
+
+  // Input card hides once a URL is set OR audit is running
+  const showInputCard = !running && !previewUrl && !uploadedImage;
+  const showSplit = !!(previewUrl || uploadedImage);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden" onPaste={handlePaste}>
+
+      {/* ── TOP BAR ───────────────────────────────────────────────────────── */}
+      <div className="shrink-0 px-6 pt-5 pb-4 space-y-3 border-b border-zinc-900 bg-background">
+        {/* Title row */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-bold text-white flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-sky-400" /> UI Intelligence Agent
+            </h1>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              What is wrong with this UI, and what should change? Prioritized UI/UX issues only.
+            </p>
+          </div>
+          {/* Show "New Audit" when already in workspace */}
+          {(previewUrl || uploadedImage) && (
+            <button
+              onClick={() => {
+                setResult(null); setPreviewUrl(""); setUploadedImage(null);
+                setUrlInput(""); setEnhanceScreens([]); setShowEnhancePanel(false);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-xs text-zinc-400 hover:text-white transition-colors shrink-0"
+            >
+              <RefreshCw className="h-3 w-3" /> New Audit
+            </button>
+          )}
+        </div>
+
+        {/* Input card — hidden once audit starts */}
+        <AnimatePresence>
+          {showInputCard && (
+            <motion.div
+              initial={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              <div className="rounded-xl border border-zinc-900 bg-zinc-950 p-4 space-y-3">
+                {/* Tabs */}
+                <div className="flex rounded-lg border border-zinc-800 p-0.5 bg-zinc-900/40 w-fit">
+                  {(["url","upload"] as const).map(t => (
+                    <button key={t} onClick={() => setActiveTab(t)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all ${
+                        activeTab === t ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                      }`}
+                    >
+                      {t === "url"
+                        ? <><Globe className="h-3.5 w-3.5" /> Live URL</>
+                        : <><Upload className="h-3.5 w-3.5" /> Screenshot</>}
+                    </button>
+                  ))}
+                </div>
+
+                {/* URL tab */}
+                {activeTab === "url" && (
+                  <div className="flex gap-2">
+                    <input type="url" placeholder="https://yourproduct.com"
+                      value={urlInput}
+                      onChange={e => setUrlInput(e.target.value)}
+                      onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
+                      onKeyDown={e => e.key === "Enter" && runAudit()}
+                      className="flex-1 bg-[#18181b] border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                    />
+                    <button onClick={runAudit} disabled={running || !urlInput.trim()}
+                      className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-black transition-all shrink-0"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" /> Audit UI
+                    </button>
+                  </div>
+                )}
+
+                {/* Screenshot tab */}
+                {activeTab === "upload" && (
+                  <div className="flex items-center gap-3">
+                    {uploadedImage ? (
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <img src={uploadedImage.dataUrl} alt="" className="h-8 w-12 object-cover rounded border border-zinc-800 shrink-0" />
+                        <span className="text-[11px] text-zinc-300 truncate flex-1">{uploadedImage.label}</span>
+                        <button onClick={() => setUploadedImage(null)} className="text-zinc-500 hover:text-red-400 transition-colors shrink-0">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div onClick={() => fileRef.current?.click()}
+                        className="flex-1 border border-dashed border-zinc-800 hover:border-zinc-600 rounded-lg px-4 py-2.5 text-center cursor-pointer transition-all"
+                      >
+                        <p className="text-[11px] text-zinc-500">Click to upload or paste (Ctrl+V) — PNG, JPG, WEBP</p>
+                        <input ref={fileRef} type="file" accept="image/*" onChange={handleInitialFileSelect} className="hidden" />
+                      </div>
+                    )}
+                    <button onClick={runAudit} disabled={running || !uploadedImage}
+                      className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-black transition-all shrink-0"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" /> Audit Screenshot
+                    </button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Inline URL bar shown when already in workspace */}
+        {!showInputCard && !running && (
+          <div className="flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
+              <Globe className="h-3 w-3 text-zinc-600 shrink-0" />
+              <input type="url" placeholder="https://yourproduct.com"
+                value={urlInput}
+                onChange={e => setUrlInput(e.target.value)}
+                onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
+                onKeyDown={e => e.key === "Enter" && runAudit()}
+                className="flex-1 bg-transparent text-xs text-zinc-300 focus:outline-none placeholder-zinc-600"
+              />
+            </div>
+            <button onClick={runAudit} disabled={running || !urlInput.trim()}
+              className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-black transition-all shrink-0"
+            >
+              <Sparkles className="h-3 w-3" /> Re-audit
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── SPLIT WORKSPACE ───────────────────────────────────────────────── */}
+      {showSplit ? (
+        <div className="flex-1 flex overflow-hidden min-h-0">
+
+          {/* LEFT: website / image preview */}
+          <div className={`relative flex flex-col border-r border-zinc-900 bg-zinc-950 overflow-hidden transition-all duration-300 ease-in-out ${leftWidth}`}>
+            <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-zinc-900">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Globe className="h-3 w-3 text-sky-400" /> {previewUrl ? "Live Preview" : "Screenshot"}
+              </span>
+              <div className="flex items-center gap-1">
+                {panelState === "right-collapsed" && (
+                  <button onClick={expandBoth}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-400 hover:text-white transition-colors">
+                    <PanelRightOpen className="h-3 w-3" /> Expand Analysis
+                  </button>
+                )}
+                {panelState === "both" && (
+                  <button onClick={collapseLeft}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-zinc-800 text-[10px] text-zinc-500 hover:text-white transition-colors">
+                    <PanelLeftClose className="h-3 w-3" /> Collapse
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 overflow-hidden min-h-0">
+              {previewUrl
+                ? <WebsiteViewer url={previewUrl} />
+                : uploadedImage
+                  ? <div className="h-full overflow-y-auto p-4"><img src={uploadedImage.dataUrl} alt={uploadedImage.label} className="w-full rounded-lg border border-zinc-800" /></div>
+                  : null}
+            </div>
+          </div>
+
+          {panelState === "both" && <div className="shrink-0 w-px bg-zinc-900" />}
+
+          {/* RIGHT: AI analysis + history */}
+          <div className={`relative flex flex-col bg-background overflow-hidden transition-all duration-300 ease-in-out ${rightWidth}`}>
+
+            {/* Panel header with tab switcher */}
+            <div className="shrink-0 flex items-center justify-between px-3 py-2 border-b border-zinc-900 bg-zinc-950">
+              {/* Left: tabs */}
+              <div className="flex rounded-lg border border-zinc-800 p-0.5 bg-zinc-900/40">
+                <button onClick={() => setRightTab("analysis")}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                    rightTab === "analysis" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  <Sparkles className="h-3 w-3 text-sky-400" /> Analysis
+                  {result && <span className={`ml-1 font-mono ${scoreColor(result.overallScore)}`}>{result.overallScore}</span>}
+                </button>
+                <button onClick={() => setRightTab("history")}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+                    rightTab === "history" ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  <History className="h-3 w-3" /> History
+                  {history.length > 0 && (
+                    <span className="ml-1 text-[9px] bg-zinc-700 text-zinc-300 rounded-full px-1.5 py-0.5">{history.length}</span>
+                  )}
+                </button>
+              </div>
+
+              {/* Right: panel controls */}
+              <div className="flex items-center gap-1">
+                {panelState === "left-collapsed" && (
+                  <button onClick={expandBoth}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[10px] text-zinc-400 hover:text-white transition-colors">
+                    <PanelLeftOpen className="h-3 w-3" /> Expand Website
+                  </button>
+                )}
+                {panelState === "both" && (
+                  <button onClick={collapseRight}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md hover:bg-zinc-800 text-[10px] text-zinc-500 hover:text-white transition-colors">
+                    <PanelRightClose className="h-3 w-3" /> Collapse
+                  </button>
+                )}
+                {result && rightTab === "analysis" && (
+                  <button onClick={() => handleExport()}
+                    className="p-1 rounded-md hover:bg-zinc-800 text-zinc-500 hover:text-white transition-colors" title="Export">
+                    <Download className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ── ANALYSIS TAB ──────────────────────────────────────────── */}
+            {rightTab === "analysis" && (
+              <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin">
+
+                {/* Loading */}
+                {running && (
+                  <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
+                    <div className="h-8 w-8 border-2 border-sky-400 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-xs text-zinc-400">Running UI intelligence scan...</p>
+                    <p className="text-[10px] text-zinc-600 max-w-xs leading-relaxed">
+                      Detecting visual hierarchy, spacing, contrast, CTA, and usability issues.
+                    </p>
+                  </div>
+                )}
+
+                {/* Empty */}
+                {!running && !result && (
+                  <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center">
+                    <Sparkles className="h-8 w-8 text-zinc-700" />
+                    <p className="text-xs text-zinc-500 font-semibold">No analysis yet</p>
+                    <p className="text-[11px] text-zinc-600 max-w-xs leading-relaxed">Click Audit UI to begin.</p>
+                  </div>
+                )}
+
+                {/* Results */}
+                {result && !running && (
+                  <div className="p-4 space-y-3">
+
+                    {/* Best-results notice */}
+                    {auditSrc === "url" && (
+                      <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 flex gap-2.5">
+                        <Info className="h-3.5 w-3.5 text-sky-400 shrink-0 mt-0.5" />
+                        <p className="text-[10px] text-sky-300 leading-relaxed">
+                          <span className="font-bold">Best Results:</span> If your website has multiple pages or flows, upload screenshots of those screens below. The AI will combine the live analysis with the screenshots for a more complete review.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Score card */}
+                    <div className="rounded-xl border border-zinc-900 bg-zinc-950 p-4">
+                      <div className="flex items-start gap-3">
+                        <ScoreRing score={result.overallScore} size={14} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-bold text-white truncate">{result.pageTitle}</span>
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full bg-zinc-800 ${scoreColor(result.overallScore)}`}>
+                              {scoreLabel(result.overallScore)}
+                            </span>
+                            {auditSrc === "screenshot" && <span className="text-[9px] text-sky-400 font-bold">Multi-screen</span>}
+                          </div>
+                          <p className="text-[10px] text-zinc-400 mt-1 leading-relaxed">{result.summary}</p>
+                          {severityCounts && (
+                            <div className="flex gap-2 pt-2 flex-wrap">
+                              {(["critical","high","medium","low"] as const).map(s => {
+                                const m = SEVERITY_META[s]; const count = (severityCounts as any)[s] || 0;
+                                if (!count) return null;
+                                return (
+                                  <div key={s} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border ${m.bg}`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />
+                                    <span className={`text-[9px] font-bold ${m.color}`}>{count} {m.label}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Improve Analysis CTA / panel */}
+                    {!showEnhancePanel ? (
+                      <button onClick={() => setShowEnhancePanel(true)}
+                        className="w-full flex items-center gap-3 rounded-xl border border-zinc-800 hover:border-zinc-600 bg-zinc-950 hover:bg-zinc-900 p-3.5 text-left transition-all group"
+                      >
+                        <div className="h-8 w-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center shrink-0">
+                          <ImagePlus className="h-4 w-4 text-sky-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-white">Improve Analysis</p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">Upload screenshots from key pages (Dashboard, Settings, Checkout, Profile) for a multi-screen review.</p>
+                        </div>
+                        <Plus className="h-3.5 w-3.5 text-zinc-600 group-hover:text-zinc-400 transition-colors shrink-0" />
+                      </button>
+                    ) : (
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-white flex items-center gap-1.5">
+                            <ImagePlus className="h-3.5 w-3.5 text-sky-400" /> Add Screenshots
+                          </p>
+                          <button onClick={() => setShowEnhancePanel(false)} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        {enhanceScreens.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {enhanceScreens.map((s, i) => (
+                              <div key={i} className="relative group">
+                                <img src={s.dataUrl} alt={s.label} className="h-14 w-20 object-cover rounded-lg border border-zinc-800" />
+                                <button onClick={() => setEnhanceScreens(prev => prev.filter((_,idx) => idx !== i))}
+                                  className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-zinc-800 hover:bg-red-500 text-zinc-400 hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                                  <X className="h-2.5 w-2.5" />
+                                </button>
+                                <p className="text-[8px] text-zinc-500 mt-0.5 text-center truncate max-w-[80px]">{s.label}</p>
+                              </div>
+                            ))}
+                            <button onClick={() => enhanceFileRef.current?.click()}
+                              className="h-14 w-20 rounded-lg border-2 border-dashed border-zinc-800 hover:border-zinc-600 flex items-center justify-center text-zinc-600 hover:text-zinc-400 transition-colors">
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div onClick={() => enhanceFileRef.current?.click()}
+                            className="border-2 border-dashed border-zinc-800 hover:border-zinc-600 rounded-xl p-5 text-center cursor-pointer transition-all">
+                            <Upload className="h-5 w-5 text-zinc-600 mx-auto mb-1.5" />
+                            <p className="text-[11px] text-zinc-500 font-semibold">Click to add or paste (Ctrl+V)</p>
+                            <p className="text-[10px] text-zinc-600 mt-0.5">Dashboard, Settings, Checkout, Profile, etc.</p>
+                          </div>
+                        )}
+                        <input ref={enhanceFileRef} type="file" accept="image/*" multiple onChange={handleEnhanceFileSelect} className="hidden" />
+
+                        <button onClick={runEnhancement} disabled={enhancing || enhanceScreens.length === 0}
+                          className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-black transition-all">
+                          {enhancing
+                            ? <><div className="h-3 w-3 border-2 border-black border-t-transparent rounded-full animate-spin" /> Updating...</>
+                            : <><Sparkles className="h-3.5 w-3.5" /> Improve Analysis ({enhanceScreens.length} screen{enhanceScreens.length !== 1 ? "s" : ""})</>}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Filters */}
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      <span className="text-[10px] text-zinc-600 font-mono">{filteredIssues.length}/{result.issues.length}</span>
+                      <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-[10px] text-zinc-400 focus:outline-none">
+                        <option value="all">All Severities</option>
+                        {(["critical","high","medium","low"] as const).map(s => <option key={s} value={s}>{SEVERITY_META[s].label}</option>)}
+                      </select>
+                      <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1 text-[10px] text-zinc-400 focus:outline-none">
+                        <option value="all">All Categories</option>
+                        {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Issue list */}
+                    <div className="space-y-2">
+                      {filteredIssues.map((issue, i) => <IssueCard key={issue.id} issue={issue} index={i} />)}
+                      {filteredIssues.length === 0 && (
+                        <p className="text-center py-10 text-zinc-600 italic text-xs">No issues match the filter.</p>
+                      )}
+                    </div>
+
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── HISTORY TAB ───────────────────────────────────────────── */}
+            {rightTab === "history" && (
+              <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin p-4 space-y-3">
+
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                    {history.length} saved audit{history.length !== 1 ? "s" : ""}
+                  </p>
+                  {history.length > 0 && (
+                    <button onClick={clearHistory}
+                      className="flex items-center gap-1 text-[10px] text-zinc-600 hover:text-red-400 transition-colors">
+                      <Trash2 className="h-3 w-3" /> Clear all
+                    </button>
+                  )}
+                </div>
+
+                {history.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                    <History className="h-8 w-8 text-zinc-700" />
+                    <p className="text-xs text-zinc-500 font-semibold">No history yet</p>
+                    <p className="text-[10px] text-zinc-600 max-w-xs">Completed audits are saved here automatically.</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {history.map(entry => (
+                    <div key={entry.id}
+                      className="rounded-xl border border-zinc-900 bg-zinc-950 hover:border-zinc-800 transition-colors overflow-hidden"
+                    >
+                      <div className="flex items-center gap-3 p-3">
+                        <ScoreRing score={entry.overallScore} size={10} />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[11px] font-bold text-white truncate">{entry.pageTitle}</p>
+                          <p className="text-[9px] text-zinc-500 font-mono mt-0.5 flex items-center gap-1.5">
+                            <Clock className="h-2.5 w-2.5" /> {fmtDate(entry.createdAt)}
+                            <span>·</span> {entry.issueCount} issues
+                            <span>·</span> {entry.auditSrc === "url" ? "URL" : "Screenshot"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => restoreFromHistory(entry)}
+                            className="px-2 py-1 rounded-lg bg-zinc-800 hover:bg-sky-500 hover:text-black text-[10px] text-zinc-400 hover:text-white font-semibold transition-all"
+                          >
+                            Load
+                          </button>
+                          <button onClick={() => handleExport(entry.result)}
+                            className="p-1 rounded-md hover:bg-zinc-800 text-zinc-600 hover:text-white transition-colors" title="Export">
+                            <Download className="h-3 w-3" />
+                          </button>
+                          <button onClick={() => deleteHistoryEntry(entry.id)}
+                            className="p-1 rounded-md hover:bg-zinc-800 text-zinc-600 hover:text-red-400 transition-colors" title="Delete">
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+              </div>
+            )}
+
+          </div>{/* end right panel */}
+        </div>
+
+      ) : (
+        /* Empty state — no URL yet */
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
+          <Globe className="h-10 w-10 text-zinc-800" />
+          <p className="text-sm font-semibold text-zinc-500">Enter a URL to begin</p>
+          <p className="text-[11px] text-zinc-600 max-w-sm leading-relaxed">
+            Type a live URL above and click Audit UI. The website preview and AI analysis appear side by side.
+          </p>
+        </div>
+      )}
 
     </div>
   );
