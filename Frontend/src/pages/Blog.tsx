@@ -144,10 +144,10 @@ export default function Blog() {
     <div className="min-h-screen bg-background flex text-foreground relative z-10 font-sans">
       <Sidebar />
       <div
-        className="flex-1 w-full text-foreground relative z-10 font-sans transition-all duration-[220ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+        className="flex-1 min-w-0 w-full text-foreground relative z-10 font-sans transition-all duration-[220ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
         style={{ marginLeft: isMobile ? 0 : collapsed ? 56 : 224, paddingTop: isMobile ? 56 : 0 }}
       >
-        <div className="max-w-6xl mx-auto px-6 py-10 w-full text-foreground relative z-10">
+        <div className="max-w-6xl mx-auto px-8 py-12 w-full text-foreground relative z-10">
           
           {/* Access Denied Banner */}
           {accessDenied && (
@@ -160,12 +160,12 @@ export default function Blog() {
           )}
 
           {/* Page Title & Controls */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 border-b border-border/50 pb-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 border-b border-border/50 pb-8">
             <div>
-              <h1 className="text-3xl font-display font-bold bg-clip-text text-transparent bg-gradient-to-r from-white via-foreground/90 to-muted-foreground">
-                STAROX Intellect Blog
+              <h1 className="text-4xl font-display font-bold text-foreground">
+                STAROX Intellect <span className="text-primary">Blog</span>
               </h1>
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-sm text-muted-foreground mt-2">
                 Latest updates, guides, and expert perspectives from our engineering and ML teams.
               </p>
             </div>
@@ -194,30 +194,27 @@ export default function Blog() {
           </div>
 
           {/* Search, Categories, Tags Row */}
-          <div className="flex flex-col lg:flex-row gap-6 mb-10">
+          <div className="flex flex-col lg:flex-row gap-4 mb-10">
             <form onSubmit={handleSearchSubmit} className="relative w-full lg:w-96">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
                 type="text"
                 placeholder="Search articles, keywords, or authors..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-xl bg-surface border border-border/50 text-sm text-foreground focus:outline-none focus:border-primary/50 transition-colors"
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-muted border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-ring/20 transition-colors"
               />
             </form>
 
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none flex-1">
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none flex-1">
               {CATEGORIES.map(category => (
                 <button
                   key={category}
-                  onClick={() => {
-                    setSelectedCategory(category);
-                    setPage(1);
-                  }}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all shrink-0 ${
-                    selectedCategory === category 
-                      ? "border-primary bg-primary/10 text-primary shadow-[0_0_12px_rgba(59,130,246,0.15)]"
-                      : "border-border/50 bg-surface hover:bg-surface-hover text-muted-foreground hover:text-foreground"
+                  onClick={() => { setSelectedCategory(category); setPage(1); }}
+                  className={`px-4 py-2 rounded-full text-xs font-semibold border transition-all shrink-0 ${
+                    selectedCategory === category
+                      ? "border-primary bg-primary/10 text-primary"
+                      : "border-border bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
                   }`}
                 >
                   {category}
@@ -232,21 +229,16 @@ export default function Blog() {
               <p className="text-sm text-muted-foreground">Loading blog publications...</p>
             </div>
           ) : posts.length === 0 ? (
-            <div className="glass-card text-center p-16">
+            <div className="rounded-2xl border border-border bg-muted/30 text-center p-16">
               <Folder className="w-12 h-12 text-muted-foreground/40 mx-auto mb-4" />
-              <h3 className="font-semibold text-lg">No articles found</h3>
-              <p className="text-sm text-muted-foreground mt-1">
+              <h3 className="font-semibold text-lg text-foreground">No articles found</h3>
+              <p className="text-sm text-muted-foreground mt-2">
                 We couldn't find any articles matching your filters. Try checking back later or modifying your search.
               </p>
               {(search || selectedCategory !== "All" || selectedTag) && (
                 <button
-                  onClick={() => {
-                    setSearch("");
-                    setSelectedCategory("All");
-                    setSelectedTag("");
-                    setPage(1);
-                  }}
-                  className="mt-4 px-4 py-2 rounded-xl border border-border bg-surface text-xs font-semibold hover:bg-surface-hover"
+                  onClick={() => { setSearch(""); setSelectedCategory("All"); setSelectedTag(""); setPage(1); }}
+                  className="mt-5 px-5 py-2 rounded-full border border-border bg-background text-xs font-semibold hover:bg-muted transition-colors"
                 >
                   Reset filters
                 </button>

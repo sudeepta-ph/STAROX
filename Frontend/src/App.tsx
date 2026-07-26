@@ -25,6 +25,7 @@ import TeamsTeamX from "@/pages/TeamsTeamX";
 import NotFound from "@/pages/NotFound";
 import Analytics from "@/pages/Analytics";
 import Connectors from "@/pages/Connectors";
+import ProductsPage from "@/pages/Products";
 
 // Blog Pages
 import Blog from "./pages/Blog";
@@ -189,6 +190,10 @@ export default function App() {
             <Route path="/" element={<Navigate to="/starox-intelligence" replace />} />
             <Route path="/dashboard" element={<Navigate to="/starox-intelligence" replace />} />
             <Route path="/starox-intelligence" element={<StaroxIntelligence />} />
+            <Route path="/products" element={<ProductsPage />} />
+            <Route path="/starox-intelligence/community" element={<ComingSoon title="STAROX Community" description="A space for builders, founders, and teams using STAROX to connect, share, and grow together. Early access coming soon." />} />
+            <Route path="/build" element={<ComingSoon title="STAROX BUILD" description="Websites, apps & SaaS development powered by AI. Full-stack builds, design-to-deployment pipelines, and production-ready products — launching soon." />} />
+            <Route path="/automation" element={<ComingSoon title="STAROX AUTOMATION" description="Business & AI automations that eliminate repetitive work. Connect your tools, trigger intelligent workflows, and scale without the overhead — coming soon." />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/help" element={<Help />} />
 
