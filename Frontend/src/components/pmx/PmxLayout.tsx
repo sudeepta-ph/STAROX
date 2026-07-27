@@ -4,35 +4,32 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
   Database,
-  Fingerprint,
   TrendingUp,
-  AlertTriangle,
-  Lightbulb,
-  CheckSquare,
+  Sparkles,
+  FileText,
   Award,
+  Lightbulb,
   Clock,
   Settings,
   HelpCircle,
   Command,
-  Sparkles
 } from "lucide-react";
 import { usePmxStore } from "@/lib/pmxStore";
 import Sidebar from "@/components/Sidebar";
 import { useSidebarStore } from "@/lib/sidebarStore";
+import PmxStatusBar from "@/components/pmx/PmxStatusBar";
+import AskPmx from "@/components/pmx/AskPmx";
 
 const pmxNav = [
-  { name: "Overview", icon: LayoutDashboard, path: "/pmx/overview", shortcut: "g o" },
-  { name: "Sources", icon: Database, path: "/pmx/sources", shortcut: "g s" },
-  { name: "Evidence", icon: Fingerprint, path: "/pmx/evidence", shortcut: "g e" },
-  { name: "Analysis", icon: TrendingUp, path: "/pmx/analysis", shortcut: "g a" },
-  { name: "Problems", icon: AlertTriangle, path: "/pmx/problems", shortcut: "g p" },
-  { name: "Opportunities", icon: Lightbulb, path: "/pmx/opportunities", shortcut: "g u" },
-  { name: "Decisions", icon: CheckSquare, path: "/pmx/decisions", shortcut: "g d" },
-  { name: "Solutions", icon: Sparkles, path: "/pmx/solutions", shortcut: "g n" },
-  { name: "Execution", icon: Award, path: "/pmx/execution", shortcut: "g x" },
-  { name: "Artifacts", icon: Clock, path: "/pmx/artifacts", shortcut: "g r" },
-  { name: "History", icon: Clock, path: "/pmx/history", shortcut: "g h" },
-  { name: "Settings", icon: Settings, path: "/pmx/settings", shortcut: "g ," }
+  { name: "Overview",  icon: LayoutDashboard, path: "/pmx/overview",  shortcut: "g o" },
+  { name: "Sources",   icon: Database,        path: "/pmx/sources",   shortcut: "g s" },
+  { name: "Analysis",  icon: TrendingUp,      path: "/pmx/analysis",  shortcut: "g a" },
+  { name: "Insights",  icon: Sparkles,        path: "/pmx/insights",  shortcut: "g i" },
+  { name: "PRD",       icon: FileText,        path: "/pmx/prd",       shortcut: "g p" },
+  { name: "Execution", icon: Award,           path: "/pmx/execution", shortcut: "g x" },
+  { name: "Artifacts", icon: Lightbulb,       path: "/pmx/artifacts", shortcut: "g r" },
+  { name: "History",   icon: Clock,           path: "/pmx/history",   shortcut: "g h" },
+  { name: "Settings",  icon: Settings,        path: "/pmx/settings",  shortcut: "g ," },
 ];
 
 function useIsMobile() {
@@ -85,12 +82,9 @@ export default function PmxLayout() {
         e.preventDefault();
         if (key === "o") navigate("/pmx/overview");
         if (key === "s") navigate("/pmx/sources");
-        if (key === "e") navigate("/pmx/evidence");
         if (key === "a") navigate("/pmx/analysis");
-        if (key === "p") navigate("/pmx/problems");
-        if (key === "u") navigate("/pmx/opportunities");
-        if (key === "d") navigate("/pmx/decisions");
-        if (key === "n") navigate("/pmx/solutions");
+        if (key === "i") navigate("/pmx/insights");
+        if (key === "p") navigate("/pmx/prd");
         if (key === "x") navigate("/pmx/execution");
         if (key === "r") navigate("/pmx/artifacts");
         if (key === "h") navigate("/pmx/history");
@@ -156,9 +150,13 @@ export default function PmxLayout() {
 
         {/* Dynamic Nested Page Content */}
         <main className="flex-1 overflow-y-auto bg-background relative z-10 scroll-smooth">
+          <PmxStatusBar />
           <Outlet />
         </main>
       </div>
+
+      {/* Ask PMX floating assistant */}
+      <AskPmx />
 
       {/* ── COMMAND PALETTE SEARCH MODAL ────────────────────────────── */}
       <AnimatePresence>

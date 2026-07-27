@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Settings, User, CreditCard,
   HelpCircle, FileText, BarChart3, Bell, Shield, LogOut,
   LogIn, ChevronDown, PanelLeftClose, PanelLeftOpen, Menu, X, Star, BookOpen, Plug,
-  Database, Fingerprint, TrendingUp, AlertTriangle, Lightbulb, CheckSquare, Sparkles, Award, Clock, ArrowLeft
+  Database, TrendingUp, Lightbulb, Sparkles, Award, Clock, ArrowLeft
 } from "lucide-react";
 import { useAuthStore } from "@/lib/authStore";
 import { useClerk } from "@clerk/clerk-react";
@@ -23,18 +23,15 @@ const mainNav = [
 ];
 
 const pmxNav = [
-  { name: "Overview",      icon: LayoutDashboard, path: "/pmx/overview" },
-  { name: "Sources",       icon: Database,        path: "/pmx/sources" },
-  { name: "Evidence",      icon: Fingerprint,     path: "/pmx/evidence" },
-  { name: "Analysis",      icon: TrendingUp,      path: "/pmx/analysis" },
-  { name: "Problems",      icon: AlertTriangle,   path: "/pmx/problems" },
-  { name: "Opportunities", icon: Lightbulb,       path: "/pmx/opportunities" },
-  { name: "Decisions",     icon: CheckSquare,     path: "/pmx/decisions" },
-  { name: "Solutions",     icon: Sparkles,        path: "/pmx/solutions" },
-  { name: "Execution",     icon: Award,           path: "/pmx/execution" },
-  { name: "Artifacts",     icon: Clock,           path: "/pmx/artifacts" },
-  { name: "History",       icon: Clock,           path: "/pmx/history" },
-  { name: "Settings",      icon: Settings,        path: "/pmx/settings" },
+  { name: "Overview",  icon: LayoutDashboard, path: "/pmx/overview" },
+  { name: "Sources",   icon: Database,        path: "/pmx/sources" },
+  { name: "Analysis",  icon: TrendingUp,      path: "/pmx/analysis" },
+  { name: "Insights",  icon: Sparkles,        path: "/pmx/insights" },
+  { name: "PRD",       icon: FileText,        path: "/pmx/prd" },
+  { name: "Execution", icon: Award,           path: "/pmx/execution" },
+  { name: "Artifacts", icon: Lightbulb,       path: "/pmx/artifacts" },
+  { name: "History",   icon: Clock,           path: "/pmx/history" },
+  { name: "Settings",  icon: Settings,        path: "/pmx/settings" },
 ];
 
 const bottomNav = [

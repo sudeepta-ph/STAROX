@@ -538,38 +538,7 @@ function FeaturesSection() {
           ))}
         </div>
 
-        {/* Divider */}
-        <div className="mt-14 border-t border-border/40" />
 
-        {/* Icon strip label */}
-        <p className="mt-8 text-center text-sm font-semibold text-foreground">
-          STAROX Intelligence includes:
-        </p>
-
-        {/* Workspace icon strip */}
-        <motion.div
-          className="mt-6 flex flex-wrap items-center justify-center gap-6"
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.4, delay: 0.1 }}
-        >
-          {WORKSPACE_ICONS.map((item) => (
-            <div key={item.name} className="flex flex-col items-center gap-1.5">
-              {item.img ? (
-                <img src={item.img} alt={item.name} className="h-12 w-12 object-contain rounded-2xl" />
-              ) : (
-                <div
-                  className="flex h-12 w-12 items-center justify-center rounded-2xl shadow-sm"
-                  style={{ background: isDark ? item.bgDark : item.bgLight }}
-                >
-                  <item.icon className="h-6 w-6" style={{ color: isDark ? item.accentDark : item.accentLight }} />
-                </div>
-              )}
-              <span className="text-[10px] text-muted-foreground font-medium">{item.name}</span>
-            </div>
-          ))}
-        </motion.div>
 
       </div>
     </section>
