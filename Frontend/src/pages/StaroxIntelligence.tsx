@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, Component, ErrorInfo, ReactNode, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "next-themes";
 import {
@@ -22,12 +22,78 @@ import {
   BarChart3,
   Plug,
   FileText,
+  Folder,
+  Compass,
+  MessageSquare,
+  Terminal,
+  ClipboardList,
+  User,
+  Sliders,
+  Mail,
+  AlertCircle,
   type LucideIcon,
 } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuthStore } from "@/lib/authStore";
 import { useClerk } from "@clerk/clerk-react";
 import AuthModal from "@/components/AuthModal";
+import { SEARCH_ITEMS } from "@/lib/searchData";
+
+const SEARCH_ICON_MAP: Record<string, LucideIcon> = {
+  LayoutDashboard,
+  Code2,
+  Zap,
+  Users,
+  Folder,
+  Compass,
+  CreditCard,
+  BookOpen,
+  MessageSquare,
+  HelpCircle,
+  BarChart3,
+  Plug,
+  FileText,
+  Terminal,
+  ClipboardList,
+  User,
+  Sliders,
+  Mail,
+  AlertCircle
+};
+
+const getSearchIcon = (name: string): LucideIcon => {
+  return SEARCH_ICON_MAP[name] || HelpCircle;
+};
+
+const POPULAR_ITEMS = [
+  { title: "STAROX PMX", route: "/products/pmx", iconName: "LayoutDashboard", desc: "Project Intelligence" },
+  { title: "Teams", route: "/teams", iconName: "Users", desc: "AI workspaces" },
+  { title: "Pricing", route: "/pricing", iconName: "CreditCard", desc: "View plans" },
+  { title: "Docs", route: "/help#docs", iconName: "FileText", desc: "Getting started" },
+  { title: "Connectors", route: "/connectors", iconName: "Plug", desc: "Integrate stack" },
+  { title: "Blog", route: "/blog", iconName: "BookOpen", desc: "Read articles" }
+];
+
+function HighlightMatch({ text, query }: { text: string; query: string }) {
+  if (!query) return <span>{text}</span>;
+  
+  const regex = new RegExp(`(${query.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")})`, "gi");
+  const parts = text.split(regex);
+  
+  return (
+    <span>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="bg-primary/25 text-primary font-bold rounded-sm px-0.5">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </span>
+  );
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,7 +114,7 @@ interface Workspace {
 const WORKSPACES: Workspace[] = [
   {
     id: "pmx",
-    route: "/pmx",
+    route: "/products/pmx",
     img: "/pmx.png",
     name: "STAROX PMX",
     label: "Project Management & Execution",
@@ -59,7 +125,7 @@ const WORKSPACES: Workspace[] = [
   },
   {
     id: "build",
-    route: "/build",
+    route: "/products/build",
     img: "/build.png",
     name: "STAROX BUILD",
     label: "Websites, Apps & SaaS Development",
@@ -70,7 +136,7 @@ const WORKSPACES: Workspace[] = [
   },
   {
     id: "automation",
-    route: "/automation",
+    route: "/products/automation",
     img: "/auto.png",
     name: "STAROX AUTOMATION",
     label: "Business & AI Automations",
@@ -81,7 +147,7 @@ const WORKSPACES: Workspace[] = [
   },
   {
     id: "teams",
-    route: "/teams",
+    route: "/products/teams",
     img: "/teams.png",
     name: "STAROX TEAMS",
     label: "Managed Dev, Marketing, Design, Ops & Content Editing",
@@ -89,6 +155,43 @@ const WORKSPACES: Workspace[] = [
     accentDark: "#f87171",
     bgLight: "#fce8e6",
     bgDark: "rgba(248,113,113,0.10)",
+  },
+];
+
+interface ToolProduct {
+  id: string;
+  route: string;
+  icon: LucideIcon;
+  name: string;
+  label: string;
+  accentLight: string;
+  accentDark: string;
+  bgLight: string;
+  bgDark: string;
+}
+
+const TOOLS_PRODUCTS: ToolProduct[] = [
+  {
+    id: "analytics",
+    route: "/analytics",
+    icon: BarChart3,
+    name: "Analytics",
+    label: "Understand your product deeply.",
+    accentLight: "#7c3aed",
+    accentDark: "#a78bfa",
+    bgLight: "#ede9fe",
+    bgDark: "rgba(167,139,250,0.15)",
+  },
+  {
+    id: "connectors",
+    route: "/connectors",
+    icon: Plug,
+    name: "Connectors",
+    label: "Integrate your entire stack.",
+    accentLight: "#0f766e",
+    accentDark: "#2dd4bf",
+    bgLight: "#ccfbf1",
+    bgDark: "rgba(45,212,191,0.13)",
   },
 ];
 
@@ -104,49 +207,178 @@ const NAV_LINKS = [
 // ── Solutions data ────────────────────────────────────────────────────────────
 
 const SOLUTIONS_WHO = [
-  { title: "For Work",          desc: "Run on what you build." },
-  { title: "Founders",          desc: "Ship before you pitch." },
-  { title: "Product managers",  desc: "Prototype, don't spec." },
-  { title: "Designers",         desc: "Your designs, built." },
-  { title: "Marketers",         desc: "Launch pages in minutes." },
-  { title: "Sales",             desc: "Build the demo live." },
-  { title: "Ops",               desc: "Tools that fit your flow." },
-  { title: "People",            desc: "HR tools your team loves." },
+  { title: "For Work",          desc: "Run on what you build.", href: "/solutions/for-work" },
+  { title: "Founders",          desc: "Ship before you pitch.", href: "/solutions/founders" },
+  { title: "Product managers",  desc: "Prototype, don't spec.", href: "/solutions/product-managers" },
+  { title: "Designers",         desc: "Your designs, built.", href: "/solutions/designers" },
+  { title: "Marketers",         desc: "Launch pages in minutes.", href: "/solutions/marketing" },
+  { title: "Sales",             desc: "Build the demo live.", href: "/solutions/sales" },
+  { title: "Ops",               desc: "Tools that fit your flow.", href: "/solutions/operations" },
+  { title: "People",            desc: "HR tools your team loves.", href: "/solutions/hr" },
 ];
 
 const SOLUTIONS_USE_CASES = [
-  { title: "Websites",       desc: "From idea to live site." },
-  { title: "Prototyping",    desc: "Proof of concept in hours." },
-  { title: "Internal tools", desc: "Built for your team." },
+  { title: "Websites",       desc: "From idea to live site.", href: "/solutions/websites" },
+  { title: "Prototyping",    desc: "Proof of concept in hours.", href: "/solutions/prototyping" },
+  { title: "Internal tools", desc: "Built for your team.", href: "/solutions/internal-tools" },
 ];
 
 const smoothEase = [0.22, 1, 0.36, 1] as const;
 
-// ── Solutions Dropdown ───────────────────────────────────────────────────────
+// ── MegaMenuDropdown Component ───────────────────────────────────────────────
 
-function SolutionsDropdown() {
+interface MegaMenuDropdownProps {
+  label: string;
+  parentHref: string;
+  children: React.ReactNode | ((close: () => void) => React.ReactNode);
+  dropdownWidth?: number | string;
+}
+
+export function MegaMenuDropdown({
+  label,
+  parentHref,
+  children,
+  dropdownWidth = 560
+}: MegaMenuDropdownProps) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const navigate = useNavigate();
+  const closeTimeoutRef = useRef<number | null>(null);
 
+  // Check if touch device or mobile width
+  const isTouchDevice = () => {
+    return !window.matchMedia("(hover: hover)").matches || window.innerWidth < 768;
+  };
+
+  const handleMouseEnter = () => {
+    if (isTouchDevice()) return;
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+    setOpen(true);
+  };
+
+  const handleMouseLeave = () => {
+    if (isTouchDevice()) return;
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setOpen(false);
+    }, 180); // 150-200ms delay to avoid flickering
+  };
+
+  const handleTriggerClick = (e: React.MouseEvent) => {
+    if (isTouchDevice()) {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+      } else {
+        setOpen(false);
+        navigate(parentHref);
+      }
+    } else {
+      // On desktop, click navigates to parent page immediately
+      setOpen(false);
+      navigate(parentHref);
+    }
+  };
+
+  const getFocusableItems = () => {
+    if (!containerRef.current) return [];
+    return Array.from(
+      containerRef.current.querySelectorAll<HTMLButtonElement | HTMLAnchorElement>(
+        'a[href], button:not([disabled])'
+      )
+    );
+  };
+
+  // Keyboard accessibility
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        setTimeout(() => {
+          const items = getFocusableItems();
+          if (items.length > 0) items[0].focus();
+        }, 50);
+      } else {
+        const items = getFocusableItems();
+        const currentIndex = items.indexOf(document.activeElement as any);
+        if (currentIndex === -1) {
+          if (items.length > 0) items[0].focus();
+        } else {
+          const nextIndex = (currentIndex + 1) % items.length;
+          items[nextIndex].focus();
+        }
+      }
+    } else if (e.key === "ArrowUp" && open) {
+      e.preventDefault();
+      const items = getFocusableItems();
+      const currentIndex = items.indexOf(document.activeElement as any);
+      if (currentIndex === -1) {
+        if (items.length > 0) items[items.length - 1].focus();
+      } else {
+        const prevIndex = (currentIndex - 1 + items.length) % items.length;
+        items[prevIndex].focus();
+      }
+    }
+  };
+
+  // Focus out close handler
+  const handleBlur = (e: React.FocusEvent) => {
+    if (containerRef.current && !containerRef.current.contains(e.relatedTarget as Node)) {
+      setOpen(false);
+    }
+  };
+
+  // Close on outside clicks (useful for touch devices)
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    const clickOutsideHandler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("mousedown", clickOutsideHandler);
+    return () => document.removeEventListener("mousedown", clickOutsideHandler);
   }, []);
 
+  // Clean timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) clearTimeout(closeTimeoutRef.current);
+    };
+  }, []);
+
+  const closeMenu = () => setOpen(false);
+
   return (
-    <div className="relative" ref={ref}>
+    <div
+      className="relative"
+      ref={containerRef}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onBlur={handleBlur}
+    >
       <button
-        onClick={() => setOpen((o) => !o)}
+        ref={triggerRef}
+        onClick={handleTriggerClick}
+        onKeyDown={handleKeyDown}
+        aria-haspopup="true"
+        aria-expanded={open}
         className={`flex items-center gap-0.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
           open
             ? "bg-muted text-foreground"
             : "text-muted-foreground hover:bg-muted hover:text-foreground"
         }`}
       >
-        Solutions
+        {label}
         <ChevronDown
           className={`h-3.5 w-3.5 opacity-60 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
@@ -154,162 +386,218 @@ function SolutionsDropdown() {
 
       <AnimatePresence>
         {open && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-
-            <motion.div
-              initial={{ opacity: 0, y: 10, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 10, scale: 0.98 }}
-              transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute left-0 top-[calc(100%+10px)] z-50 flex overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl"
-              style={{ minWidth: 560 }}
-            >
-              {/* ── Left panel: Who is it for? ── */}
-              <div className="flex-1 px-7 py-6">
-                <p className="mb-5 text-xs text-muted-foreground">Who is it for?</p>
-                <div className="grid grid-cols-2 gap-x-10 gap-y-4">
-                  {SOLUTIONS_WHO.map((item) => (
-                    <button
-                      key={item.title}
-                      onClick={() => setOpen(false)}
-                      className="group text-left"
-                    >
-                      <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors leading-tight">
-                        {item.title}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground leading-snug">
-                        {item.desc}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* ── Divider ── */}
-              <div className="w-px bg-border/60 my-4" />
-
-              {/* ── Right panel: Use cases ── */}
-              <div className="w-52 shrink-0 px-7 py-6">
-                <p className="mb-5 text-xs text-muted-foreground">Use cases</p>
-                <div className="flex flex-col gap-4">
-                  {SOLUTIONS_USE_CASES.map((item) => (
-                    <button
-                      key={item.title}
-                      onClick={() => setOpen(false)}
-                      className="group text-left"
-                    >
-                      <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors leading-tight">
-                        {item.title}
-                      </p>
-                      <p className="mt-0.5 text-xs text-muted-foreground leading-snug">
-                        {item.desc}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </>
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.98 }}
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute left-0 top-[calc(100%+8px)] z-50 flex overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl"
+            style={{ width: dropdownWidth }}
+          >
+            {typeof children === "function" ? children(closeMenu) : children}
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
   );
 }
+// ── Legacy Dropdowns ────────────────────────────────────────────────────────
+export function SolutionsDropdown() { return null; }
+export function ProductsDropdown() { return null; }
 
-// ── Products Dropdown ────────────────────────────────────────────────────────
-
-function ProductsDropdown() {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+// ── Shared Mega Menu Component ───────────────────────────────────────────────
+export function SharedMegaMenu({
+  activeTab,
+  dir,
+  onClose,
+  handleMenuMouseEnter,
+  handleMenuMouseLeave,
+}: {
+  activeTab: "solutions" | "products";
+  dir: "left" | "right";
+  onClose: () => void;
+  handleMenuMouseEnter: () => void;
+  handleMenuMouseLeave: () => void;
+}) {
   const navigate = useNavigate();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
 
-  // Close on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  const handleProductClick = (route: string) => {
+    onClose();
+    if (route.startsWith("http") || route.includes(".space")) {
+      window.location.href = route;
+    } else {
+      navigate(route);
+    }
+  };
+
+  const slideVariants = {
+    enter: (direction: "left" | "right") => ({
+      x: direction === "right" ? 80 : -80,
+      opacity: 0,
+      filter: "blur(2px)",
+    }),
+    center: {
+      x: 0,
+      opacity: 1,
+      filter: "blur(0px)",
+    },
+    exit: (direction: "left" | "right") => ({
+      x: direction === "right" ? -80 : 80,
+      opacity: 0,
+      filter: "blur(2px)",
+    }),
+  };
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-0.5 rounded-lg px-3 py-1.5 text-sm transition-colors ${
-          open
-            ? "bg-muted text-foreground"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-        }`}
-      >
-        Products
-        <ChevronDown
-          className={`h-3.5 w-3.5 opacity-60 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      <AnimatePresence>
-        {open && (
-          <>
-            {/* Backdrop */}
-            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-
+    <motion.div
+      initial={{ opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 10, scale: 0.98 }}
+      transition={{ duration: 0.18, ease: smoothEase }}
+      onMouseEnter={handleMenuMouseEnter}
+      onMouseLeave={handleMenuMouseLeave}
+      className="shared-megamenu-container absolute left-0 top-[calc(100%+8px)] z-50 overflow-hidden rounded-2xl border border-border bg-popover shadow-2xl w-[560px] h-[390px]"
+    >
+      <div className="relative w-full h-full">
+        <AnimatePresence initial={false} custom={dir} mode="popLayout">
+          {activeTab === "solutions" ? (
             <motion.div
-              initial={{ opacity: 0, y: 8, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 8, scale: 0.97 }}
-              transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute left-0 top-[calc(100%+8px)] z-50 w-80 overflow-hidden rounded-2xl border border-border bg-popover shadow-xl"
+              key="solutions"
+              custom={dir}
+              variants={slideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.22, ease: smoothEase }}
+              className="flex w-full h-full absolute inset-0"
             >
-              {/* Header */}
-              <div className="border-b border-border/60 px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Workspaces
-                </p>
+              {/* Left panel: Who is it for? */}
+              <div className="flex-1 px-7 py-6 flex flex-col justify-between">
+                <div>
+                  <p className="mb-4 text-xs text-muted-foreground uppercase tracking-widest font-semibold">Who is it for?</p>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-3.5">
+                    {SOLUTIONS_WHO.map((item) => (
+                      <Link
+                        key={item.title}
+                        to={item.href}
+                        onClick={onClose}
+                        className="group text-left"
+                      >
+                        <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors leading-tight">
+                          {item.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground leading-snug">
+                          {item.desc}
+                        </p>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              {/* Items */}
-              <div className="p-2">
-                {WORKSPACES.map((ws) => {
-                  return (
+              {/* Divider */}
+              <div className="w-px bg-border/60 my-4 shrink-0" />
+
+              {/* Right panel: Use cases */}
+              <div className="w-52 shrink-0 px-7 py-6 flex flex-col">
+                <p className="mb-4 text-xs text-muted-foreground uppercase tracking-widest font-semibold">Use cases</p>
+                <div className="flex flex-col gap-3.5">
+                  {SOLUTIONS_USE_CASES.map((item) => (
+                    <Link
+                      key={item.title}
+                      to={item.href}
+                      onClick={onClose}
+                      className="group text-left"
+                    >
+                      <p className="text-sm font-bold text-foreground group-hover:text-primary transition-colors leading-tight">
+                        {item.title}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground leading-snug">
+                        {item.desc}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="products"
+              custom={dir}
+              variants={slideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.22, ease: smoothEase }}
+              className="flex flex-col w-full h-full absolute inset-0 p-6 gap-5"
+            >
+              {/* Workspaces Segment */}
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-widest font-semibold mb-3">
+                  Workspaces
+                </p>
+                <div className="grid grid-cols-2 gap-3 w-full">
+                  {WORKSPACES.map((ws) => (
                     <button
                       key={ws.id}
-                      onClick={() => { setOpen(false); navigate(ws.route); }}
-                      className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-muted transition-colors group"
+                      onClick={() => handleProductClick(ws.route)}
+                      className="flex items-center gap-3 rounded-xl p-2.5 text-left hover:bg-muted transition-colors group border border-border/10 w-full"
                     >
                       <img src={ws.img} alt={ws.name} className="h-9 w-9 shrink-0 object-contain rounded-xl" />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-foreground leading-tight">{ws.name}</p>
-                        <p className="text-xs text-muted-foreground leading-snug truncate">{ws.label}</p>
+                        <p className="text-xs text-muted-foreground leading-snug truncate mt-0.5">{ws.label}</p>
                       </div>
                       <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
                     </button>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
 
-              {/* Footer */}
-              <div className="border-t border-border/60 px-4 py-2.5">
-                <button
-                  onClick={() => { setOpen(false); navigate("/products"); }}
-                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                >
-                  See all products
-                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                </button>
+              {/* Segment Divider */}
+              <div className="h-px bg-border/60 w-full shrink-0" />
+
+              {/* Tools & Integrations Segment */}
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-widest font-semibold mb-3">
+                  Tools & Integrations
+                </p>
+                <div className="grid grid-cols-2 gap-3 w-full">
+                  {TOOLS_PRODUCTS.map((tool) => {
+                    const bg = isDark ? tool.bgDark : tool.bgLight;
+                    const accent = isDark ? tool.accentDark : tool.accentLight;
+                    return (
+                      <button
+                        key={tool.id}
+                        onClick={() => handleProductClick(tool.route)}
+                        className="flex items-center gap-3 rounded-xl p-2.5 text-left hover:bg-muted transition-colors group border border-border/10 w-full"
+                      >
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ background: bg }}>
+                          <tool.icon className="h-5 w-5" style={{ color: accent }} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-foreground leading-tight">{tool.name}</p>
+                          <p className="text-xs text-muted-foreground leading-snug truncate mt-0.5">{tool.label}</p>
+                        </div>
+                        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors" />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
   );
 }
 
 // ── Theme Cycle Button ───────────────────────────────────────────────────────
 
-function ThemeCycleButton() {
+export function ThemeCycleButton() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -377,7 +665,7 @@ function WorkspaceTile({
 
 // ── User Avatar / Auth ───────────────────────────────────────────────────────
 
-function UserAvatar({
+export function UserAvatar({
   onSignIn,
 }: {
   onSignIn: () => void;
@@ -651,31 +939,31 @@ function MarqueeSection() {
             return (
               <motion.div
                 key={i}
-                className="group w-64 shrink-0 rounded-2xl border border-border/60 bg-card p-5 flex flex-col gap-4 cursor-pointer relative overflow-hidden"
+                className="group w-64 h-[310px] shrink-0 rounded-2xl border border-border/60 bg-card p-5 flex flex-col gap-3.5 cursor-pointer relative overflow-hidden"
                 onClick={() => navigate(card.route)}
                 whileHover={{
-                  scale: 1.04,
-                  y: -6,
+                  y: -4,
+                  scale: 1.02,
                   boxShadow: isDark
-                    ? "0 20px 48px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)"
-                    : "0 20px 48px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)",
+                    ? "0 12px 24px -10px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08), 0 0 12px rgba(255,255,255,0.02)"
+                    : "0 12px 24px -10px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06), 0 0 12px rgba(0,0,0,0.01)",
                 }}
                 transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               >
                 {/* Preview area */}
                 <div
-                  className="h-32 rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-105"
+                  className="h-28 rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-105"
                   style={{ background: bg }}
                 >
                   {'img' in card && card.img ? (
                     <img
                       src={card.img}
                       alt={card.label}
-                      className="h-20 w-20 object-contain opacity-90 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
+                      className="h-16 w-16 object-contain opacity-90 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
                     />
                   ) : (
                     <card.icon
-                      className="h-12 w-12 opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
+                      className="h-10 w-10 opacity-80 transition-all duration-300 group-hover:opacity-100 group-hover:scale-110"
                       style={{ color: accent }}
                     />
                   )}
@@ -693,24 +981,9 @@ function MarqueeSection() {
                   <span className="text-[11px] font-semibold text-muted-foreground">{card.label}</span>
                 </div>
 
-                <div className="flex-1">
+                <div className="space-y-1">
                   <p className="text-sm font-bold text-foreground leading-snug">{card.title}</p>
-                  <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{card.desc}</p>
-                </div>
-
-                {/* Go to button — fades in on hover */}
-                <div
-                  className="overflow-hidden transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]
-                    max-h-0 opacity-0 group-hover:max-h-10 group-hover:opacity-100"
-                >
-                  <button
-                    onClick={(e) => { e.stopPropagation(); navigate(card.route); }}
-                    className="mt-1 inline-flex w-full items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-semibold transition-colors duration-150"
-                    style={{ background: bg, color: accent }}
-                  >
-                    Go to {card.label}
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </button>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{card.desc}</p>
                 </div>
               </motion.div>
             );
@@ -757,7 +1030,7 @@ function CtaSection({ onGetStarted }: { onGetStarted: () => void }) {
 
 // ── Social Footer ─────────────────────────────────────────────────────────────
 
-function SocialFooter() {
+export function SocialFooter() {
   const socials = [
     {
       label: "LinkedIn",
@@ -811,7 +1084,12 @@ function SocialFooter() {
       {/* Social bar */}
       <div className="border-b border-border/40 bg-muted/20">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-5 px-4 py-4 sm:px-6">
-          <span className="text-sm text-muted-foreground font-medium shrink-0">Follow our blog</span>
+          <Link
+            to="/blog"
+            className="text-sm text-muted-foreground hover:text-foreground font-medium shrink-0 transition-colors"
+          >
+            Follow our blog
+          </Link>
           <div className="w-px h-4 bg-border/60" />
           <div className="flex items-center gap-4">
             {socials.map((s) => (
@@ -831,14 +1109,14 @@ function SocialFooter() {
       </div>
 
       {/* Bottom bar */}
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
-        <div className="flex items-center gap-2">
+      <div className="mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-4 sm:px-6 relative">
+        <div className="flex items-center justify-center gap-3.5 sm:absolute sm:left-1/2 sm:-translate-x-1/2">
           <img src="/strx.png" alt="STAROX" className="h-4 w-4 object-contain opacity-50" />
-          <span className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} STAROX Intelligence
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            © {new Date().getFullYear()} STAROX
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-5">
+        <div className="flex flex-wrap items-center justify-center gap-5 sm:ml-auto">
           {[
             { label: "Privacy", href: "/privacy" },
             { label: "Help",    href: "/help" },
@@ -858,14 +1136,399 @@ function SocialFooter() {
     </footer>
   );
 }
+class SearchErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
-// ── Main Page ────────────────────────────────────────────────────────────────
+  static getDerivedStateFromError(_error: Error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("[Search Error Boundary] caught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null;
+    }
+    return this.props.children;
+  }
+}
+
+// ── Global Search Panel Component ────────────────────────────────────────────
+
+function GlobalSearchPanel({
+  query,
+  setQuery,
+  onClose
+}: {
+  query: string;
+  setQuery: (q: string) => void;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [recents, setRecents] = useState<any[]>([]);
+
+  // Load recents on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("starox_recent_searches");
+      if (stored) {
+        setRecents(JSON.parse(stored));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  // Save to recents
+  const saveToRecents = (item: any) => {
+    try {
+      const stored = localStorage.getItem("starox_recent_searches");
+      let list = stored ? JSON.parse(stored) : [];
+      list = list.filter((x: any) => x.route !== item.route);
+      list.unshift({ 
+        title: item.title, 
+        route: item.route, 
+        iconName: item.iconName, 
+        description: item.description 
+      });
+      list = list.slice(0, 5);
+      localStorage.setItem("starox_recent_searches", JSON.stringify(list));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Auto focus input
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Filter items based on query
+  const flatMatches = useMemo(() => {
+    if (!query) return [];
+    const term = query.trim().toLowerCase();
+    return SEARCH_ITEMS.filter((item) => {
+      return (
+        item.title.toLowerCase().includes(term) ||
+        item.description.toLowerCase().includes(term) ||
+        item.keywords.some((kw) => kw.toLowerCase().includes(term))
+      );
+    });
+  }, [query]);
+
+  // Group filtered results
+  const groupedResults = useMemo(() => {
+    const groups: Record<string, typeof SEARCH_ITEMS> = {};
+    flatMatches.forEach((item) => {
+      if (!groups[item.category]) {
+        groups[item.category] = [];
+      }
+      groups[item.category].push(item);
+    });
+    return groups;
+  }, [flatMatches]);
+
+  // Reset active index when query changes
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
+
+  const handleItemClick = (item: any) => {
+    saveToRecents(item);
+    onClose();
+    setQuery("");
+    navigate(item.route);
+  };
+
+  // Keyboard navigation inside dropdown
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      onClose();
+      return;
+    }
+    
+    const itemsCount = query ? flatMatches.length : POPULAR_ITEMS.length + recents.length;
+    if (itemsCount === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev + 1) % itemsCount);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((prev) => (prev - 1 + itemsCount) % itemsCount);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (query) {
+        if (flatMatches[activeIndex]) {
+          handleItemClick(flatMatches[activeIndex]);
+        }
+      } else {
+        const combined = [...recents, ...POPULAR_ITEMS];
+        if (combined[activeIndex]) {
+          handleItemClick(combined[activeIndex]);
+        }
+      }
+    }
+  };
+
+  // Auto-scroll highlighted result
+  useEffect(() => {
+    if (activeIndex >= 0) {
+      const el = document.getElementById(`search-item-${activeIndex}`);
+      el?.scrollIntoView({ block: "nearest" });
+    }
+  }, [activeIndex]);
+
+  return (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      className="border-t border-border/40 bg-background px-6 py-4 sm:px-10 relative flex flex-col z-50 w-full"
+    >
+      {/* Search input bar */}
+      <div className="relative flex items-center w-full">
+        <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Search products, tools, docs, settings, help..."
+          className="w-full rounded-2xl border border-border bg-muted/30 py-3 pl-12 pr-20 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring/30 transition-all font-medium"
+        />
+        
+        {/* Keyboard shortcut indicator */}
+        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] font-bold text-muted-foreground bg-muted border border-border px-2 py-1 rounded-md shadow-sm">
+          <span>⌘</span>
+          <span>K</span>
+        </div>
+      </div>
+
+      {/* Results Dropdown */}
+      <div
+        className="mt-3 max-h-[380px] overflow-y-auto w-full border border-border bg-popover rounded-2xl p-2 shadow-2xl space-y-4 scrollbar-thin animate-in fade-in duration-200"
+      >
+        {query ? (
+          flatMatches.length > 0 ? (
+            <div className="space-y-4">
+              {Object.entries(groupedResults).map(([category, items]) => (
+                <div key={category} className="space-y-1">
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-3 py-1.5 border-b border-border/10">
+                    {category}
+                  </h4>
+                  <div className="space-y-0.5 mt-1">
+                    {items.map((item) => {
+                      const globalIndex = flatMatches.indexOf(item);
+                      const isActive = globalIndex === activeIndex;
+                      const Icon = getSearchIcon(item.iconName);
+
+                      return (
+                        <button
+                          key={item.route}
+                          id={`search-item-${globalIndex}`}
+                          onClick={() => handleItemClick(item)}
+                          className={`flex w-full items-center justify-between px-3 py-2 rounded-xl text-left transition-colors ${
+                            isActive
+                              ? "bg-muted text-foreground"
+                              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="h-7 w-7 rounded-lg flex items-center justify-center bg-muted/40 border border-border/30">
+                              <Icon className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-bold text-foreground">
+                                <HighlightMatch text={item.title} query={query} />
+                              </p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate max-w-[480px]">
+                                <HighlightMatch text={item.description} query={query} />
+                              </p>
+                            </div>
+                          </div>
+                          <ArrowRight className="h-3.5 w-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Empty State matching */
+            <div className="py-8 text-center space-y-4">
+              <p className="text-xs text-muted-foreground">
+                No results found matching "<span className="font-bold text-foreground">{query}</span>"
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
+                <span className="text-muted-foreground text-[11px]">Try searching:</span>
+                {["PMX", "Pricing", "Docs", "Automation"].map((keyword) => (
+                  <button
+                    key={keyword}
+                    onClick={() => setQuery(keyword)}
+                    className="px-2.5 py-1 rounded-full border border-border bg-muted/30 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors text-[10px] font-semibold"
+                  >
+                    {keyword}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        ) : (
+          /* Empty State: Popular & Recent */
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-2">
+            {/* Recents */}
+            {recents.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-2 border-b border-border/10 pb-1">
+                  Recent
+                </h4>
+                <div className="space-y-0.5 mt-1">
+                  {recents.map((item, idx) => {
+                    const isActive = idx === activeIndex;
+                    const Icon = getSearchIcon(item.iconName);
+                    return (
+                      <button
+                        key={item.route}
+                        id={`search-item-${idx}`}
+                        onClick={() => handleItemClick(item)}
+                        className={`flex w-full items-center gap-3 px-3 py-2 rounded-xl text-left transition-colors ${
+                          isActive
+                            ? "bg-muted text-foreground"
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                        }`}
+                      >
+                        <div className="h-7 w-7 rounded-lg flex items-center justify-center bg-muted/40 border border-border/30">
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-foreground truncate">{item.title}</p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                            {item.description}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Popular */}
+            <div className="space-y-2">
+              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-2 border-b border-border/10 pb-1">
+                Popular
+              </h4>
+              <div className="space-y-0.5 mt-1">
+                {POPULAR_ITEMS.map((item, idx) => {
+                  const actualIdx = recents.length + idx;
+                  const isActive = actualIdx === activeIndex;
+                  const Icon = getSearchIcon(item.iconName);
+                  return (
+                    <button
+                      key={item.route}
+                      id={`search-item-${actualIdx}`}
+                      onClick={() => handleItemClick(item)}
+                      className={`flex w-full items-center gap-3 px-3 py-2 rounded-xl text-left transition-colors ${
+                        isActive
+                          ? "bg-muted text-foreground"
+                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      }`}
+                    >
+                      <div className="h-7 w-7 rounded-lg flex items-center justify-center bg-muted/40 border border-border/30">
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-foreground">{item.title}</p>
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          {item.desc}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 const StaroxIntelligence = () => {
   const navigate = useNavigate();
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Shared Mega Menu states
+  const [activeTab, setActiveTab] = useState<"solutions" | "products" | null>(null);
+  const [dir, setDir] = useState<"left" | "right">("right");
+  const closeTimeoutRef = useRef<number | null>(null);
+
+  const handleTabChange = (newTab: "solutions" | "products" | null) => {
+    if (newTab && activeTab) {
+      if (activeTab === "solutions" && newTab === "products") {
+        setDir("right");
+      } else if (activeTab === "products" && newTab === "solutions") {
+        setDir("left");
+      }
+    }
+    setActiveTab(newTab);
+  };
+
+  const handleNavMouseLeave = () => {
+    if (closeTimeoutRef.current) window.clearTimeout(closeTimeoutRef.current);
+    closeTimeoutRef.current = window.setTimeout(() => {
+      const hoverEl = document.querySelector(".shared-megamenu-container:hover");
+      if (!hoverEl) {
+        handleTabChange(null);
+      }
+    }, 180);
+  };
+
+  const handleMenuMouseEnter = () => {
+    if (closeTimeoutRef.current) {
+      window.clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const handleMenuMouseLeave = () => {
+    if (closeTimeoutRef.current) window.clearTimeout(closeTimeoutRef.current);
+    closeTimeoutRef.current = window.setTimeout(() => {
+      handleTabChange(null);
+    }, 180);
+  };
+
+  const handleNavBlur = (e: React.FocusEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      handleTabChange(null);
+    }
+  };
+
+  // Global Cmd/Ctrl + K shortcut to focus/toggle search
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -885,24 +1548,85 @@ const StaroxIntelligence = () => {
           </Link>
 
           {/* Nav links — centre-left */}
-          <nav className="hidden md:flex items-center gap-0.5">
-            {NAV_LINKS.map((link) =>
-              link.hasSolutionsDropdown ? (
-                <SolutionsDropdown key={link.label} />
-              ) : link.hasDropdown ? (
-                <ProductsDropdown key={link.label} />
-              ) : (
-                <Link
-                  key={link.label}
-                  to={link.href!}
-                  className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                >
-                  {link.label}
-                </Link>
-              )
-            )}
-          </nav>
+          <nav 
+            className="hidden md:flex items-center gap-0.5 relative"
+            onMouseLeave={handleNavMouseLeave}
+            onBlur={handleNavBlur}
+          >
+            <button
+              onMouseEnter={() => handleTabChange("solutions")}
+              onFocus={() => handleTabChange("solutions")}
+              onClick={() => navigate("/solutions")}
+              aria-haspopup="true"
+              aria-expanded={activeTab === "solutions"}
+              className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                activeTab === "solutions" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              Solutions
+            </button>
 
+            <button
+              onMouseEnter={() => handleTabChange("products")}
+              onFocus={() => handleTabChange("products")}
+              onClick={(e) => { e.preventDefault(); handleTabChange(activeTab === "products" ? null : "products"); }}
+              aria-haspopup="true"
+              aria-expanded={activeTab === "products"}
+              className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
+                activeTab === "products" ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              Products
+            </button>
+
+            <Link
+              to="/starox-intelligence/community"
+              onMouseEnter={() => handleTabChange(null)}
+              onFocus={() => handleTabChange(null)}
+              className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              Community
+            </Link>
+
+            <Link
+              to="/pricing"
+              onMouseEnter={() => handleTabChange(null)}
+              onFocus={() => handleTabChange(null)}
+              className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              Pricing
+            </Link>
+
+            <Link
+              to="/blog"
+              onMouseEnter={() => handleTabChange(null)}
+              onFocus={() => handleTabChange(null)}
+              className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              Blog
+            </Link>
+
+            <Link
+              to="/help"
+              onMouseEnter={() => handleTabChange(null)}
+              onFocus={() => handleTabChange(null)}
+              className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              Help
+            </Link>
+
+            <AnimatePresence>
+              {activeTab && (
+                <SharedMegaMenu 
+                  activeTab={activeTab} 
+                  dir={dir} 
+                  onClose={() => handleTabChange(null)}
+                  handleMenuMouseEnter={handleMenuMouseEnter}
+                  handleMenuMouseLeave={handleMenuMouseLeave}
+                />
+              )}
+            </AnimatePresence>
+          </nav>
           {/* Spacer pushes right actions to far right edge */}
           <div className="flex-1" />
 
@@ -920,28 +1644,22 @@ const StaroxIntelligence = () => {
           </div>
         </div>
 
-        {/* Expandable search bar */}
-        {searchOpen && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="border-t border-border/40 bg-background/95 px-4 py-3 sm:px-6"
-          >
-            <input
-              autoFocus
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search workspaces…"
-              className="w-full rounded-xl border border-border bg-muted px-4 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring/30 transition-colors"
-            />
-          </motion.div>
-        )}
+        {/* Sticky Global Search Panel */}
+        <AnimatePresence>
+          {searchOpen && (
+            <SearchErrorBoundary>
+              <GlobalSearchPanel
+                query={searchQuery}
+                setQuery={setSearchQuery}
+                onClose={() => setSearchOpen(false)}
+              />
+            </SearchErrorBoundary>
+          )}
+        </AnimatePresence>
       </header>
 
       {/* ── Hero Section ─────────────────────────────────────────── */}
-      <section className="relative overflow-hidden">
+      <section className="relative overflow-hidden min-h-[calc(100dvh-64px)] flex flex-col justify-center items-center py-[clamp(2rem,6vh,5rem)]">
         {/* Subtle background gradient — light/dark aware */}
         <div
           aria-hidden
@@ -950,16 +1668,16 @@ const StaroxIntelligence = () => {
             dark:bg-[radial-gradient(ellipse_120%_60%_at_10%_0%,rgba(96,165,250,0.08)_0%,transparent_55%),radial-gradient(ellipse_80%_50%_at_90%_100%,rgba(74,222,128,0.06)_0%,transparent_55%)]"
         />
 
-        <div className="relative mx-auto max-w-7xl px-4 pt-28 pb-28 sm:px-6 sm:pt-36 sm:pb-36">
+        <div className="relative mx-auto max-w-7xl px-4 sm:px-6 w-full flex flex-col justify-center items-center">
           <motion.div
-            className="text-center"
+            className="flex flex-col items-center text-center gap-[clamp(1rem,3vh,2rem)] max-w-4xl"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: smoothEase }}
           >
             {/* Badge */}
             <motion.span
-              className="mb-4 inline-flex items-center rounded-full border border-primary/20 bg-primary/8 px-3.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-primary"
+              className="inline-flex items-center rounded-full border border-primary/20 bg-primary/8 px-3.5 py-1 text-[clamp(10px,1.2vw,12px)] font-semibold uppercase tracking-widest text-primary"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.05, ease: smoothEase }}
@@ -969,7 +1687,7 @@ const StaroxIntelligence = () => {
 
             {/* Headline */}
             <motion.h1
-              className="mx-auto mt-3 max-w-3xl font-display text-[clamp(2.4rem,6.5vw,4.5rem)] font-bold leading-tight tracking-tight text-foreground"
+              className="font-display text-[clamp(2rem,6vw,5rem)] font-bold leading-[1.15] tracking-tight text-foreground max-w-3xl"
               initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.34, delay: 0.09, ease: smoothEase }}
@@ -979,7 +1697,7 @@ const StaroxIntelligence = () => {
 
             {/* Subline */}
             <motion.p
-              className="mx-auto mt-5 max-w-lg text-lg leading-relaxed text-muted-foreground"
+              className="max-w-xl text-[clamp(0.95rem,1.8vw,1.25rem)] leading-relaxed text-muted-foreground"
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.14, ease: smoothEase }}
@@ -989,21 +1707,21 @@ const StaroxIntelligence = () => {
 
             {/* CTA */}
             <motion.div
-              className="mt-9 flex flex-wrap items-center justify-center gap-4"
+              className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.28, delay: 0.2, ease: smoothEase }}
             >
               <button
                 onClick={() => navigate("/pmx")}
-                className="inline-flex items-center gap-2 rounded-full bg-primary px-8 py-3 text-base font-semibold text-primary-foreground shadow-[0_4px_14px_rgba(26,115,232,0.35)] hover:bg-primary/90 transition-all"
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-full bg-primary px-8 py-3 text-base font-semibold text-primary-foreground shadow-[0_4px_14px_rgba(26,115,232,0.35)] hover:bg-primary/90 transition-all"
               >
                 Get Started
                 <ArrowRight className="h-4 w-4" />
               </button>
               <Link
                 to="/pricing"
-                className="inline-flex items-center gap-2 rounded-full border border-border px-8 py-3 text-base font-medium text-foreground/80 hover:bg-muted transition-all"
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2 rounded-full border border-border px-8 py-3 text-base font-medium text-foreground/80 hover:bg-muted transition-all"
               >
                 View Pricing
               </Link>

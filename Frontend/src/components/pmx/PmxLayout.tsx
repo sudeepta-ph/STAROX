@@ -150,7 +150,7 @@ export default function PmxLayout() {
 
         {/* Dynamic Nested Page Content */}
         <main className="flex-1 overflow-y-auto bg-background relative z-10 scroll-smooth">
-          <PmxStatusBar />
+          {location.pathname !== "/pmx/overview" && location.pathname !== "/pmx" && <PmxStatusBar />}
           <Outlet />
         </main>
       </div>
