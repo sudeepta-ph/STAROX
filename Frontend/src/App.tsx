@@ -25,7 +25,6 @@ import TeamsTeamX from "@/pages/TeamsTeamX";
 import NotFound from "@/pages/NotFound";
 import Analytics from "@/pages/Analytics";
 import Connectors from "@/pages/Connectors";
-import ProductsPage from "@/pages/Products";
 
 // Blog Pages
 import Blog from "./pages/Blog";
@@ -192,7 +191,13 @@ export default function App() {
             <Route path="/" element={<Navigate to="/starox-intelligence" replace />} />
             <Route path="/dashboard" element={<Navigate to="/starox-intelligence" replace />} />
             <Route path="/starox-intelligence" element={<StaroxIntelligence />} />
-            <Route path="/products" element={<ProductsPage />} />
+            <Route path="/products" element={<Navigate to="/starox-intelligence" replace />} />
+            <Route path="/products/pmx" element={<Navigate to="/pmx" replace />} />
+            <Route path="/products/build" element={<Navigate to="/build" replace />} />
+            <Route path="/products/automation" element={<Navigate to="/automation" replace />} />
+            <Route path="/products/teams" element={<Navigate to="/teams" replace />} />
+            <Route path="/solutions" element={<ComingSoon title="STAROX Solutions" description="Tailored workspaces and intelligence pipelines for founders, product managers, designers, marketing, sales, HR, and operations. Launching soon." />} />
+            <Route path="/solutions/:segment" element={<ComingSoon title="STAROX Solutions" description="Tailored workspace and intelligence pipelines for your specific team or use case. Launching soon." />} />
             <Route path="/starox-intelligence/community" element={<ComingSoon title="STAROX Community" description="A space for builders, founders, and teams using STAROX to connect, share, and grow together. Early access coming soon." />} />
             <Route path="/build" element={<ComingSoon title="STAROX BUILD" description="Websites, apps & SaaS development powered by AI. Full-stack builds, design-to-deployment pipelines, and production-ready products — launching soon." />} />
             <Route path="/automation" element={<ComingSoon title="STAROX AUTOMATION" description="Business & AI automations that eliminate repetitive work. Connect your tools, trigger intelligent workflows, and scale without the overhead — coming soon." />} />
