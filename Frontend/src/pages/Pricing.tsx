@@ -64,17 +64,6 @@ export default function PricingPage() {
             <div className="hero-beam" />
           </motion.div>
 
-          {/* Half-star background accentuation */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute z-0 transition-opacity duration-300
-              right-0 top-[25%] [transform:translateY(-50%)_translateX(50%)]
-              max-[1400px]:right-auto max-[1400px]:left-1/2 max-[1400px]:top-[35%] max-[1400px]:[transform:translate(-50%,-50%)] max-[1400px]:opacity-[0.16]"
-            style={{ width: "clamp(340px, 45vw, 480px)", aspectRatio: "1" }}
-          >
-            <img src="/hero-star-core.svg" alt="" className="h-full w-full object-contain hero-edge-star-img" />
-          </div>
-
           {/* Main Content Area */}
           <div className="relative z-10 flex-1 flex flex-col py-16 px-4">
             

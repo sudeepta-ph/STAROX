@@ -25,6 +25,7 @@ import TeamsTeamX from "@/pages/TeamsTeamX";
 import NotFound from "@/pages/NotFound";
 import Analytics from "@/pages/Analytics";
 import Connectors from "@/pages/Connectors";
+import ProductsPage from "@/pages/Products";
 
 // Blog Pages
 import Blog from "./pages/Blog";
@@ -43,6 +44,8 @@ import PmxProblems from "@/pages/pmx/PmxProblems";
 import PmxOpportunities from "@/pages/pmx/PmxOpportunities";
 import PmxDecisions from "@/pages/pmx/PmxDecisions";
 import PmxSolutions from "@/pages/pmx/PmxSolutions";
+import PmxInsights from "@/pages/pmx/PmxInsights";
+import PmxPrd from "@/pages/pmx/PmxPrd";
 import PmxExecution from "@/pages/pmx/PmxExecution";
 import PmxArtifacts from "@/pages/pmx/PmxArtifacts";
 import PmxHistory from "@/pages/pmx/PmxHistory";
@@ -189,6 +192,10 @@ export default function App() {
             <Route path="/" element={<Navigate to="/starox-intelligence" replace />} />
             <Route path="/dashboard" element={<Navigate to="/starox-intelligence" replace />} />
             <Route path="/starox-intelligence" element={<StaroxIntelligence />} />
+            <Route path="/products" element={<ProductsPage />} />
+            <Route path="/starox-intelligence/community" element={<ComingSoon title="STAROX Community" description="A space for builders, founders, and teams using STAROX to connect, share, and grow together. Early access coming soon." />} />
+            <Route path="/build" element={<ComingSoon title="STAROX BUILD" description="Websites, apps & SaaS development powered by AI. Full-stack builds, design-to-deployment pipelines, and production-ready products — launching soon." />} />
+            <Route path="/automation" element={<ComingSoon title="STAROX AUTOMATION" description="Business & AI automations that eliminate repetitive work. Connect your tools, trigger intelligent workflows, and scale without the overhead — coming soon." />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/help" element={<Help />} />
 
@@ -217,17 +224,20 @@ export default function App() {
                 <Route index element={<Navigate to="/pmx/overview" replace />} />
                 <Route path="overview" element={<PmxOverview />} />
                 <Route path="sources" element={<PmxSources />} />
-                <Route path="evidence" element={<PmxEvidence />} />
                 <Route path="analysis" element={<PmxAnalysis />} />
-                <Route path="problems" element={<PmxProblems />} />
-                <Route path="opportunities" element={<PmxOpportunities />} />
-                <Route path="decisions" element={<PmxDecisions />} />
-                <Route path="solutions" element={<PmxSolutions />} />
+                <Route path="insights" element={<PmxInsights />} />
+                <Route path="prd" element={<PmxPrd />} />
                 <Route path="execution" element={<PmxExecution />} />
                 <Route path="artifacts" element={<PmxArtifacts />} />
                 <Route path="history" element={<PmxHistory />} />
                 <Route path="settings" element={<PmxSettings />} />
                 <Route path="docs" element={<PmxDocs />} />
+                {/* Legacy redirects — keep old URLs working */}
+                <Route path="evidence" element={<Navigate to="/pmx/insights" replace />} />
+                <Route path="problems" element={<Navigate to="/pmx/insights" replace />} />
+                <Route path="opportunities" element={<Navigate to="/pmx/insights" replace />} />
+                <Route path="decisions" element={<Navigate to="/pmx/insights" replace />} />
+                <Route path="solutions" element={<Navigate to="/pmx/prd" replace />} />
               </Route>
             </Route>
             
