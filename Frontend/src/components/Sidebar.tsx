@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Settings, User, CreditCard,
   HelpCircle, FileText, BarChart3, Bell, Shield, LogOut,
   LogIn, ChevronDown, PanelLeftClose, PanelLeftOpen, Menu, X, Star, BookOpen, Plug,
-  Database, TrendingUp, Lightbulb, Sparkles, Award, Clock, ArrowLeft
+  Database, TrendingUp, Lightbulb, Sparkles, Award, Clock, ArrowLeft, ArrowRight
 } from "lucide-react";
 import { useAuthStore } from "@/lib/authStore";
 import { useClerk } from "@clerk/clerk-react";
@@ -23,15 +23,15 @@ const mainNav = [
 ];
 
 const pmxNav = [
-  { name: "Overview",  icon: LayoutDashboard, path: "/pmx/overview" },
-  { name: "Sources",   icon: Database,        path: "/pmx/sources" },
-  { name: "Analysis",  icon: TrendingUp,      path: "/pmx/analysis" },
-  { name: "Insights",  icon: Sparkles,        path: "/pmx/insights" },
-  { name: "PRD",       icon: FileText,        path: "/pmx/prd" },
-  { name: "Execution", icon: Award,           path: "/pmx/execution" },
-  { name: "Artifacts", icon: Lightbulb,       path: "/pmx/artifacts" },
-  { name: "History",   icon: Clock,           path: "/pmx/history" },
-  { name: "Settings",  icon: Settings,        path: "/pmx/settings" },
+  { name: "Overview",   icon: LayoutDashboard, path: "/pmx/overview" },
+  { name: "Sources",    icon: Database,        path: "/pmx/sources" },
+  { name: "AI EXPERIENCE Intelligence", icon: TrendingUp, path: "/pmx/analysis", glow: true },
+  { name: "Insights",   icon: Sparkles,        path: "/pmx/insights" },
+  { name: "PRD",        icon: FileText,        path: "/pmx/prd" },
+  { name: "Execution",  icon: Award,           path: "/pmx/execution" },
+  { name: "Artifacts",  icon: Lightbulb,       path: "/pmx/artifacts" },
+  { name: "History",    icon: Clock,           path: "/pmx/history" },
+  { name: "Settings",   icon: Settings,        path: "/pmx/settings" },
 ];
 
 const bottomNav = [
@@ -62,15 +62,19 @@ const Sidebar = () => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [startPulseMobile, setStartPulseMobile] = useState(false);
+  const [startPulseDesktop, setStartPulseDesktop] = useState(false);
   const isMobile = useIsMobile();
+
+  const triggerStartPulse = (setter: (v: boolean) => void) => {
+    setter(true);
+    window.setTimeout(() => setter(false), 420);
+  };
 
   const isPmxRoute = location.pathname.startsWith("/pmx");
   const currentNav = isPmxRoute ? pmxNav : mainNav;
 
   const bottomNavMapped = bottomNav.map(item => {
-    if (item.name === "Settings" && isPmxRoute) {
-      return { ...item, path: "/pmx/settings" };
-    }
     return item;
   });
 
@@ -105,15 +109,26 @@ const Sidebar = () => {
       )}
       {currentNav.map((item) => {
         const active = isActive(item.path);
+        const isGlow = (item as any).glow;
         return (
           <Link key={item.path} to={item.path} onClick={onClick}
-            className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all ${
+            className={`relative flex items-center gap-3 rounded-xl px-3 py-2 text-sm transition-all ${
               active
                 ? "bg-sidebar-accent text-sidebar-foreground"
                 : "text-sidebar-foreground/50 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/80"
-            }`}>
-            <item.icon className="h-4 w-4 shrink-0" />
-            <span>{item.name}</span>
+            } ${isGlow ? "nav-shimmer" : ""}`}>
+            {isGlow && (
+              <span className="pointer-events-none absolute inset-0 rounded-xl opacity-60"
+                style={{ background: "radial-gradient(ellipse at 30% 50%, rgba(56,189,248,0.18) 0%, transparent 70%)" }} />
+            )}
+            <item.icon className={`h-4 w-4 shrink-0 ${isGlow ? "text-sky-400 drop-shadow-[0_0_6px_rgba(56,189,248,0.9)]" : ""}`} />
+            {isGlow ? (
+              <span className="text-sky-500 dark:text-sky-300 font-semibold text-[11px] tracking-tight drop-shadow-[0_0_8px_rgba(56,189,248,0.6)] leading-tight">
+                {item.name}
+              </span>
+            ) : (
+              <span>{item.name}</span>
+            )}
           </Link>
         );
       })}
@@ -132,7 +147,7 @@ const Sidebar = () => {
           </button>
 
           <Link to="/dashboard" className="flex items-center gap-2">
-            <img src="/strx.png" alt="STAROX" className="h-7 w-7 object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
+            <img src="/assets/images/strx.png" alt="STAROX" className="h-7 w-7 object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
             <span className="text-sm font-display font-bold tracking-tight text-sidebar-foreground">STAROX</span>
           </Link>
 
@@ -161,7 +176,7 @@ const Sidebar = () => {
               >
                 <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-4">
                   <Link to="/dashboard" className="flex items-center gap-2.5" onClick={() => setDrawerOpen(false)}>
-                    <img src="/strx.png" alt="STAROX" className="h-7 w-7 object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
+                    <img src="/assets/images/strx.png" alt="STAROX" className="h-7 w-7 object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
                     <span className="text-sm font-display font-bold text-sidebar-foreground">STAROX</span>
                   </Link>
                   <button onClick={() => setDrawerOpen(false)} className="p-1.5 rounded-lg text-sidebar-foreground/35 hover:text-sidebar-foreground/70 hover:bg-sidebar-accent/60">
@@ -178,23 +193,28 @@ const Sidebar = () => {
                     <div className="px-3 pb-2.5">
                       <button
                         onClick={() => {
+                          triggerStartPulse(setStartPulseMobile);
                           setDrawerOpen(false);
                           runPipeline();
                         }}
                         disabled={loading.pipeline}
-                        className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-500 hover:bg-sky-400 px-3 py-2 text-xs font-semibold text-black transition-all disabled:opacity-50"
+                        className="group relative w-full cursor-pointer border-none bg-transparent p-0 font-mono text-xs font-light uppercase outline-none disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        {loading.pipeline ? (
-                          <>
-                            <div className="h-3.5 w-3.5 border-2 border-black border-t-transparent rounded-full animate-spin shrink-0" />
-                            <span>Running...</span>
-                          </>
-                        ) : (
-                          <>
-                            <img src="/strx.png" className="h-3.5 w-3.5 object-contain shrink-0" alt="" />
-                            <span>Run AI Agent</span>
-                          </>
-                        )}
+                        <span className="absolute left-0 top-0 h-full w-full translate-y-0.5 rounded-xl bg-black/25 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:translate-y-1 group-hover:duration-[250ms] group-active:translate-y-px dark:bg-black/40" />
+                        <span className="absolute left-0 top-0 h-full w-full rounded-xl bg-gradient-to-l from-[#e0f7fa] via-[#b3e5fc] to-[#81d4fa] dark:from-[#04283f] dark:via-[#063652] dark:to-[#0a4a6e]" />
+                        <div className={`relative flex w-full -translate-y-1 items-center justify-between gap-2 rounded-xl bg-gradient-to-r from-[#b3e5fc] via-[#4fc3f7] to-[#0288d1] px-3 py-2.5 text-xs font-bold text-[#0a3d62] brightness-105 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:-translate-y-1.5 group-hover:brightness-110 group-hover:duration-[250ms] group-active:-translate-y-0.5 dark:from-[#0369a1] dark:via-[#0ea5e9] dark:to-[#38bdf8] dark:text-white ${startPulseMobile ? "start-session-pulse" : ""}`}>
+                          {loading.pipeline ? (
+                            <>
+                              <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#0a3d62] border-t-transparent dark:border-white" />
+                              <span className="select-none">Running...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="select-none">Start session</span>
+                              <ArrowRight className="-mr-0.5 h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
+                            </>
+                          )}
+                        </div>
                       </button>
                     </div>
                   )}
@@ -250,7 +270,7 @@ const Sidebar = () => {
 
         <div className="relative z-10 flex h-14 shrink-0 items-center border-b border-sidebar-border px-3">
           <Link to="/" className="flex min-w-0 flex-1 items-center gap-2.5">
-            <img src="/strx.png" alt="STAROX" className="h-7 w-7 shrink-0 object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
+            <img src="/assets/images/strx.png" alt="STAROX" className="h-7 w-7 shrink-0 object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
             <AnimatePresence>
               {!collapsed && (
                 <motion.span initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: "auto" }} exit={{ opacity: 0, width: 0 }} transition={{ duration: 0.18 }}
@@ -276,18 +296,31 @@ const Sidebar = () => {
           )}
           {currentNav.map((item) => {
             const active = isActive(item.path);
+            const isGlow = (item as any).glow;
             return (
               <Link key={item.path} to={item.path} title={collapsed ? item.name : undefined}
-                className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-all ${
+                className={`relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-all ${
                   active
                     ? "bg-sidebar-accent text-sidebar-foreground shadow-[inset_0_1px_0_hsl(var(--sidebar-foreground)/0.06),0_4px_12px_rgba(0,0,0,0.10)]"
                     : "text-sidebar-foreground/48 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/78"
-                }`}>
-                <item.icon className="h-4 w-4 shrink-0" />
+                } ${isGlow ? "nav-shimmer overflow-hidden" : ""}`}>
+                {isGlow && (
+                  <span className="pointer-events-none absolute inset-0 rounded-lg opacity-60"
+                    style={{ background: "radial-gradient(ellipse at 30% 50%, rgba(56,189,248,0.18) 0%, transparent 70%)" }} />
+                )}
+                <item.icon className={`h-4 w-4 shrink-0 ${isGlow ? "text-sky-400 drop-shadow-[0_0_6px_rgba(56,189,248,0.9)]" : ""}`} />
                 <AnimatePresence>
                   {!collapsed && (
-                    <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
-                      className="overflow-hidden whitespace-nowrap">{item.name}</motion.span>
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
+                      className="overflow-hidden whitespace-nowrap">
+                      {isGlow ? (
+                        <span className="whitespace-normal text-sky-500 dark:text-sky-300 font-semibold text-[11px] tracking-tight drop-shadow-[0_0_8px_rgba(56,189,248,0.6)] leading-tight">
+                          {item.name}
+                        </span>
+                      ) : (
+                        <span>{item.name}</span>
+                      )}
+                    </motion.div>
                   )}
                 </AnimatePresence>
               </Link>
@@ -308,22 +341,33 @@ const Sidebar = () => {
                     });
                     return;
                   }
+                  triggerStartPulse(setStartPulseDesktop);
                   setShowConfirm(true);
                 }}
                 disabled={loading.pipeline}
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-sky-500 hover:bg-sky-400 px-3 py-2 text-xs font-semibold text-black transition-all disabled:opacity-50"
+                className="group relative w-full cursor-pointer border-none bg-transparent p-0 font-mono text-xs font-light uppercase outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loading.pipeline ? (
-                  <>
-                    <div className="h-3.5 w-3.5 border-2 border-black border-t-transparent rounded-full animate-spin shrink-0" />
-                    {!collapsed && <span>Running...</span>}
-                  </>
-                ) : (
-                  <>
-                    <img src="/strx.png" className="h-3.5 w-3.5 object-contain shrink-0" alt="" />
-                    {!collapsed && <span>Run AI Agent</span>}
-                  </>
-                )}
+                <span className="absolute left-0 top-0 h-full w-full translate-y-0.5 rounded-xl bg-black/25 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:translate-y-1 group-hover:duration-[250ms] group-active:translate-y-px dark:bg-black/40" />
+                <span className="absolute left-0 top-0 h-full w-full rounded-xl bg-gradient-to-l from-[#e0f7fa] via-[#b3e5fc] to-[#81d4fa] dark:from-[#04283f] dark:via-[#063652] dark:to-[#0a4a6e]" />
+                <div
+                  className={`relative flex w-full -translate-y-1 items-center gap-2 rounded-xl bg-gradient-to-r from-[#b3e5fc] via-[#4fc3f7] to-[#0288d1] px-3 py-2.5 text-xs font-bold text-[#0a3d62] brightness-105 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:-translate-y-1.5 group-hover:brightness-110 group-hover:duration-[250ms] group-active:-translate-y-0.5 dark:from-[#0369a1] dark:via-[#0ea5e9] dark:to-[#38bdf8] dark:text-white ${
+                    collapsed ? "justify-center" : "justify-between"
+                  } ${startPulseDesktop ? "start-session-pulse" : ""}`}
+                >
+                  {loading.pipeline ? (
+                    <>
+                      <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#0a3d62] border-t-transparent dark:border-white" />
+                      {!collapsed && <span className="select-none">Running...</span>}
+                    </>
+                  ) : collapsed ? (
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
+                  ) : (
+                    <>
+                      <span className="select-none">Start session</span>
+                      <ArrowRight className="-mr-0.5 h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
+                    </>
+                  )}
+                </div>
               </button>
             </div>
           )}
@@ -425,7 +469,7 @@ const Sidebar = () => {
 
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-sky-400">
-                  <img src="/strx.png" className="h-5 w-5 object-contain" alt="" />
+                  <img src="/assets/images/strx.png" className="h-5 w-5 object-contain" alt="" />
                   <h3 className="text-sm font-bold text-white uppercase tracking-wider">Running PMX Intelligence</h3>
                 </div>
 

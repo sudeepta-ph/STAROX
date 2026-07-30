@@ -535,6 +535,121 @@ Return exactly this JSON schema (and nothing else):
 }`;
 }
 
+// ── PMX: Development PRD pipeline (backend/src/services/pmxIdeaPrd.ts) ───────
+// The whole PRD is ONE markdown document (headings, tables, checklists,
+// code fences, mermaid diagrams) so it can render as a living engineering
+// spec and be edited in place by the AI prompt bar. Five compact calls each
+// emit one markdown slice using the exact required "## Section" headings
+// (critical: the frontend splits on these to drive per-section copy), kept
+// dense and implementation-focused — no business theory, no filler.
+
+const MARKDOWN_RULES = `Formatting rules: use "## Section Title" for each top-level section, exactly as named below — no other top-level headings. Use tables for structured data (fields, endpoints, comparisons). Use "- [ ]" checklists for task lists. Use fenced code blocks with a language tag for schemas/payloads/commands. Use "> **Note:**" blockquotes as callouts for risks or assumptions. Use a fenced \`\`\`mermaid code block for any diagram (architecture, ERD, or flow) — valid mermaid syntax only. Be dense and implementation-focused: no business theory, no filler, no repeated context between sections.`;
+
+export function getIdeaDiscoveryPrompt(idea: string): string {
+  return `A developer submitted this product idea for a Development PRD — a spec for building the product, not a business plan. It may be incomplete — fill reasonable gaps yourself and list every assumption you made.
+
+Idea: "${idea}"
+
+${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "productName": "string — short product name",
+  "assumptions": ["string — each gap you filled and what you assumed, 4-8 items"],
+  "stack": {
+    "frontend": "string — e.g. React, Next.js, Vue",
+    "backend": "string — e.g. Node.js/Express, NestJS, FastAPI",
+    "database": "string — e.g. PostgreSQL, MongoDB, Supabase",
+    "cloud": "string — e.g. Vercel + Railway, AWS, GCP",
+    "authProvider": "string — e.g. Clerk, Auth0, Supabase Auth",
+    "aiProvider": "string — e.g. OpenAI, Anthropic, none",
+    "architecture": "string — Monolith | Modular Monolith | Microservices | Serverless"
+  },
+  "markdown": "string — markdown body containing exactly these sections in order: '## Executive Summary' (2-3 sentences: what it is, who it's for, why now), '## Product Goal' (1-2 sentences, the single measurable outcome), '## Problem Statement' (the concrete problem, who has it, current workaround), '## Users & Use Cases' (a short table: user type | primary use case | frequency)"
+}
+Pick the stack that best fits THIS idea — don't default to the same stack every time.`;
+}
+
+export function getIdeaProductSpecPrompt(context: string): string {
+  return `Using this product discovery context, write the functional and architectural specification.
+
+Context:
+${context}
+
+${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "markdown": "string — markdown body containing exactly these sections in order: '## Functional Requirements' (a table per feature: Feature | Description | User Story | Priority (P0/P1/P2) | Key Acceptance Criteria — 6-10 features covering the full MVP scope), '## Technical Architecture' (2-3 sentence system overview, then a \`\`\`mermaid graph TD diagram showing frontend/backend/database/external services and data flow), '## Frontend Specification' (screens/routes as a list, each with purpose + key components + loading/empty/error states, plus state management approach), '## Backend Specification' (service structure, key modules, background jobs if any)"
+}`;
+}
+
+export function getIdeaEngineeringSpecPrompt(context: string): string {
+  return `Using this specification, write the data, API, and non-functional design.
+
+Context:
+${context}
+
+${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "markdown": "string — markdown body containing exactly these sections in order: '## Database Schema' (a \`\`\`mermaid erDiagram showing every table/collection and relationships, followed by a table of key fields per entity), '## API Design' (a table: Method | Route | Request | Response | Auth — one row per endpoint, 10-20 endpoints covering every screen's data needs), '## Authentication & Authorization' (auth method, session strategy, role/permission model), '## Integrations' (payments/email/analytics/notifications/third-party APIs — 'none' where not applicable), '## Non-Functional Requirements' (a table: Category (Performance/Scalability/Security/Accessibility/Reliability) | Requirement)"
+}`;
+}
+
+export function getIdeaDeliveryPrompt(context: string): string {
+  return `Using this engineering specification, write the delivery plan.
+
+Context:
+${context}
+
+${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "markdown": "string — markdown body containing exactly these sections in order: '## Engineering Tasks' (grouped under '### Frontend', '### Backend', '### Database', '### Infrastructure', '### QA' subheadings, each a '- [ ]' checklist of specific tickets referencing real screens/tables/routes from the context — no generic tasks), '## Milestones & Development Roadmap' (exactly 4 phases — Foundation, Core Build, Polish & QA, Launch — each with duration and milestones), '## Future Enhancements' (5-8 concrete post-MVP features, answering 'what should we build next?')"
+}`;
+}
+
+export function getIdeaCodingPromptPrompt(context: string): string {
+  return `Using this complete Development PRD, write ONE master build prompt for an AI coding IDE (Cursor, Windsurf, Claude Code, Copilot, Bolt, Lovable, Replit, etc.) to build the entire production-ready application in one pass with minimal follow-up prompting.
+
+Full specification:
+${context}
+
+Write it as a well-structured markdown document covering, in order: (1) one-paragraph product summary and chosen stack, (2) database schema as a code block, (3) every screen to build with its components and states, (4) every API endpoint as a code block, (5) auth/security requirements, (6) build order referencing the roadmap phases, (7) explicit instruction to implement every functional requirement with its acceptance criteria, (8) a closing checklist of what "done" looks like. Be exhaustive and specific — this prompt is the only context the IDE will have.
+
+Return exactly this JSON schema (and nothing else):
+{ "markdown": "string — '## Master AI Coding Prompt' heading, then a single fenced code block containing the full prompt text, 800-1500 words" }`;
+}
+
+// ── PMX: Development PRD refinement (AI prompt bar / theme controls) ─────────
+export function getIdeaRefinePrompt(currentMarkdown: string, stack: Record<string, string | undefined>, instruction: string): string {
+  return `You are editing an existing Development PRD in place, the way Cursor or Claude Canvas apply an edit to a live document — not regenerating it from scratch.
+
+Current stack: ${JSON.stringify(stack)}
+
+Current PRD (markdown, section headings are "## Title"):
+${currentMarkdown}
+
+Requested change: "${instruction}"
+
+Rules:
+1. Preserve every section and every sentence that isn't affected by this change, verbatim.
+2. Only rewrite the specific sections this change actually touches (e.g. a stack swap touches Technical Architecture, Frontend/Backend Specification, Database Schema, API Design, Engineering Tasks, and the Master AI Coding Prompt — but not Problem Statement or Users & Use Cases).
+3. Keep the same "## Section Title" headings, in the same order, covering the full 17-section structure (Executive Summary, Product Goal, Problem Statement, Users & Use Cases, Functional Requirements, Technical Architecture, Frontend Specification, Backend Specification, Database Schema, API Design, Authentication & Authorization, Integrations, Non-Functional Requirements, Engineering Tasks, Milestones & Development Roadmap, Future Enhancements, Master AI Coding Prompt).
+4. If the change implies a new stack choice, update the "stack" object to match.
+5. ${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "markdown": "string — the FULL updated PRD, all 17 sections, unaffected ones copied through unchanged",
+  "stack": { "frontend": "string", "backend": "string", "database": "string", "cloud": "string", "authProvider": "string", "aiProvider": "string", "architecture": "string" },
+  "changeSummary": "string — one sentence describing what actually changed"
+}`;
+}
+
 // ── PMX: Execution Planning prompt ────────────────────────────────────────────
 export function getExecutionTasksPrompt(prd: string, techSpecs: string): string {
   return `Take the following PRD and Technical Specifications and translate them into a list of developer tickets/tasks. Group them by Sprint 1 tasks, frontend, backend, infra, testing, or deployment. Add time estimates and assignees.

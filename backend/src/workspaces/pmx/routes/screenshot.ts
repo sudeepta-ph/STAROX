@@ -7,15 +7,11 @@ import chromium from "@sparticuz/chromium";
 export const screenshotRouter = Router();
 
 async function resolveChromiumPath(): Promise<string> {
-  if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) {
-    return "/usr/bin/chromium";
-  }
-
   if (process.env.PUPPETEER_EXECUTABLE_PATH) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
 
-  // Prefer system Chromium when available (Railway/Nixpacks).
+  // Prefer system Chromium when available (e.g. the Dockerfile's apk-installed chromium).
   const absoluteCandidates = [
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
@@ -63,8 +59,7 @@ screenshotRouter.post("/screenshot", async (req: Request, res: Response) => {
   let browser;
   try {
     const executablePath = await resolveChromiumPath();
-    const isRailway = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
-    const useLambdaChromium = !isRailway && executablePath.includes("/tmp/chromium");
+    const useLambdaChromium = executablePath.includes("/tmp/chromium");
     browser = await puppeteer.launch({
       args: useLambdaChromium ? chromium.args : ["--no-sandbox", "--disable-setuid-sandbox"],
       defaultViewport: { width: Number(width), height: 900 },

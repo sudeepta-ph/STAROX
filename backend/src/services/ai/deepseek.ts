@@ -162,6 +162,91 @@ export function parseJsonResponse(text: string): any {
   }
 }
 
+export interface DeepSeekUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+// Same call/retry contract as callDeepSeek, but also returns token usage so
+// callers can enforce a hard budget across a multi-call pipeline (see
+// services/pmxIdeaPrd.ts). Kept separate from callDeepSeek so none of the
+// existing call sites need to change their destructuring.
+export async function callDeepSeekWithUsage(
+  prompt: string,
+  model?: string,
+  maxTokens = 3000,
+  systemPrompt = "You are STAROX PMX, a world-class AI Principal Product Manager. Respond ONLY with valid JSON. Do not write introductory text, markdown code blocks (unless specified), or explanations outside of the JSON structure."
+): Promise<{ content: string; usage: DeepSeekUsage }> {
+  const apiKey = env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing DEEPSEEK_API_KEY environment variable. Check backend/.env");
+  }
+
+  const selectedModel = model || AI_CONFIG.DEFAULT_MODEL;
+  const endpoint = `${AI_CONFIG.BASE_URL}/chat/completions`;
+
+  const maxRetries = 3;
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AI_CONFIG.TIMEOUT);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: selectedModel,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          temperature: AI_CONFIG.TEMPERATURE,
+          max_tokens: maxTokens,
+          response_format: { type: "json_object" },
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        if ((response.status === 429 || response.status === 502 || response.status === 503) && attempt < maxRetries) {
+          console.warn(`[DeepSeek AI] Status ${response.status} on attempt ${attempt}. Retrying...`);
+          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+          continue;
+        }
+        if (response.status === 401) throw new Error("Invalid DEEPSEEK_API_KEY configured.");
+        throw new Error(`DeepSeek API failed with status ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      return {
+        content: result.choices[0]?.message?.content ?? "{}",
+        usage: result.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      };
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") {
+        console.warn(`[DeepSeek AI] Timeout reached on attempt ${attempt}.`);
+        if (attempt < maxRetries) continue;
+        throw new Error("DeepSeek request timed out.");
+      }
+      lastError = err;
+      if (attempt < maxRetries) {
+        console.warn(`[DeepSeek AI] Error on attempt ${attempt}: ${err.message}. Retrying...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
+    }
+  }
+
+  throw lastError || new Error("All DeepSeek retries failed");
+}
+
 export async function callDeepSeek(
   prompt: string,
   model?: string,

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { AnimatePresence } from "framer-motion";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "@/lib/authStore";
 import { useClerk } from "@clerk/clerk-react";
@@ -16,12 +17,12 @@ import {
   Clock,
   ArrowRight
 } from "lucide-react";
-import { 
-  ThemeCycleButton, 
+import {
+  ThemeCycleButton,
   UserAvatar,
-  SocialFooter,
   SharedMegaMenu
 } from "./StaroxIntelligence";
+import Footer from "@/components/Footer";
 
 const CATEGORIES = ["All", "Engineering", "ML/AI", "Product", "Design", "Updates", "Guides"];
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
@@ -272,7 +273,7 @@ export default function Blog() {
           {/* Logo — left edge */}
           <Link to="/starox-intelligence" className="flex shrink-0 items-center gap-3 mr-3">
             <img
-              src="/strx.png"
+              src="/assets/images/strx.png"
               alt="STAROX"
               className="h-10 w-10 object-contain drop-shadow-[0_0_8px_rgba(56,189,248,0.55)]"
             />
@@ -663,7 +664,7 @@ export default function Blog() {
       </main>
 
       {/* ── Social Footer ────────────────────────────────────────── */}
-      <SocialFooter />
+      <Footer />
 
       {/* ── Become Admin Modal ────────────────────────────────────── */}
       {promoteOpen && (

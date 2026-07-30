@@ -12,7 +12,7 @@
 ## Tech Stack
 
 **Frontend:** React 18 · TypeScript · Vite · Tailwind CSS · shadcn/ui · Framer Motion · Recharts · Zustand  
-**Backend:** Express · Supabase · OpenAI · Stripe · Puppeteer  
+**Backend:** Express · MongoDB (Mongoose) · Clerk · DeepSeek · Puppeteer  
 **Testing:** Vitest · Testing Library
 
 ## Getting Started
@@ -53,11 +53,10 @@ src/
 backend/
 ├── src/
 │   ├── api/        # REST API routes
-│   ├── agents/     # AI agent orchestration
+│   ├── models/     # Mongoose schemas
 │   ├── services/   # Core business logic
-│   ├── database/   # Database layer
-│   └── middleware/  # Express middleware
-└── supabase-schema.sql
+│   ├── config/     # Env validation & DB connection
+│   └── middleware/ # Express middleware
 ```
 
 ## License

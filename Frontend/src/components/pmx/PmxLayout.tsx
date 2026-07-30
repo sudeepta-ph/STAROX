@@ -17,19 +17,18 @@ import {
 import { usePmxStore } from "@/lib/pmxStore";
 import Sidebar from "@/components/Sidebar";
 import { useSidebarStore } from "@/lib/sidebarStore";
-import PmxStatusBar from "@/components/pmx/PmxStatusBar";
 import AskPmx from "@/components/pmx/AskPmx";
 
 const pmxNav = [
   { name: "Overview",  icon: LayoutDashboard, path: "/pmx/overview",  shortcut: "g o" },
   { name: "Sources",   icon: Database,        path: "/pmx/sources",   shortcut: "g s" },
-  { name: "Analysis",  icon: TrendingUp,      path: "/pmx/analysis",  shortcut: "g a" },
+  { name: "UI Analysis", icon: TrendingUp,      path: "/pmx/analysis",  shortcut: "g a", glow: true },
   { name: "Insights",  icon: Sparkles,        path: "/pmx/insights",  shortcut: "g i" },
   { name: "PRD",       icon: FileText,        path: "/pmx/prd",       shortcut: "g p" },
   { name: "Execution", icon: Award,           path: "/pmx/execution", shortcut: "g x" },
   { name: "Artifacts", icon: Lightbulb,       path: "/pmx/artifacts", shortcut: "g r" },
   { name: "History",   icon: Clock,           path: "/pmx/history",   shortcut: "g h" },
-  { name: "Settings",  icon: Settings,        path: "/pmx/settings",  shortcut: "g ," },
+  { name: "PMX Settings", icon: Settings, path: "/settings", shortcut: "g ," },
 ];
 
 function useIsMobile() {
@@ -88,7 +87,7 @@ export default function PmxLayout() {
         if (key === "x") navigate("/pmx/execution");
         if (key === "r") navigate("/pmx/artifacts");
         if (key === "h") navigate("/pmx/history");
-        if (key === ",") navigate("/pmx/settings");
+        if (key === ",") navigate("/settings");
         lastKey = "";
       } else if (key === "g") {
         lastKey = "g";
@@ -150,7 +149,6 @@ export default function PmxLayout() {
 
         {/* Dynamic Nested Page Content */}
         <main className="flex-1 overflow-y-auto bg-background relative z-10 scroll-smooth">
-          {location.pathname !== "/pmx/overview" && location.pathname !== "/pmx" && <PmxStatusBar />}
           <Outlet />
         </main>
       </div>

@@ -13,7 +13,8 @@ import {
   PmxArtifactModel,
   PmxAuditLogModel,
   PmxScreenshotProjectModel,
-  PmxSessionModel
+  PmxSessionModel,
+  PmxIdeaPrdModel
 } from "../../../models/Pmx";
 import {
   generateProductUnderstanding,
@@ -24,6 +25,7 @@ import {
   generateSolutionDetails,
   generateExecutionTasks
 } from "../../../services/pmxAi";
+import { generateIdeaPrd, refineIdeaPrd, TokenBudgetExceededError } from "../../../services/pmxIdeaPrd";
 import { analyzeScreenshotUI } from "../../../services/screenshotAi";
 import { runUIAudit } from "../../../services/uiAuditAi";
 import { screenshotRouter } from "./screenshot";
@@ -213,6 +215,176 @@ export async function runDownstreamPipeline(
 
   return session;
 }
+
+// ==========================================
+// ANALYTICS OVERVIEW — powers the /analytics page
+// ==========================================
+
+// Aggregate counts, breakdowns, and a 30-day session trend for the
+// authenticated user's workspace. Everything here is a real Mongo
+// count/aggregate against the same models every other PMX page reads —
+// no cached or precomputed rollups, so it's always current.
+pmxRouter.get("/analytics/overview", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const userId = req.userId!;
+    const projectId = (req.query.projectId as string) || "default";
+    const filter = { projectId, userId, isDeleted: false };
+
+    const [
+      sources, evidence, problems, opportunities,
+      decisions, solutions, tasks, artifacts, sessions,
+    ] = await Promise.all([
+      PmxInputModel.countDocuments(filter),
+      PmxEvidenceModel.countDocuments(filter),
+      PmxProblemModel.countDocuments(filter),
+      PmxOpportunityModel.countDocuments(filter),
+      PmxDecisionModel.countDocuments(filter),
+      PmxSolutionModel.countDocuments(filter),
+      PmxExecutionTaskModel.countDocuments(filter),
+      PmxArtifactModel.countDocuments(filter),
+      PmxSessionModel.countDocuments({ projectId, userId }),
+    ]);
+
+    const [tasksByStatusAgg, problemsBySeverityAgg, decisionsByStatusAgg, avgDurationAgg] = await Promise.all([
+      PmxExecutionTaskModel.aggregate([
+        { $match: filter },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
+      PmxProblemModel.aggregate([
+        { $match: filter },
+        { $group: { _id: "$severity", count: { $sum: 1 } } },
+      ]),
+      PmxDecisionModel.aggregate([
+        { $match: filter },
+        { $group: { _id: "$status", count: { $sum: 1 } } },
+      ]),
+      PmxSessionModel.aggregate([
+        { $match: { projectId, userId } },
+        { $group: { _id: null, avg: { $avg: "$durationMs" } } },
+      ]),
+    ]);
+
+    const tasksByStatus = { todo: 0, in_progress: 0, review: 0, done: 0 };
+    for (const r of tasksByStatusAgg) if (r._id in tasksByStatus) tasksByStatus[r._id as keyof typeof tasksByStatus] = r.count;
+
+    const problemsBySeverity = { critical: 0, high: 0, medium: 0, low: 0 };
+    for (const r of problemsBySeverityAgg) if (r._id in problemsBySeverity) problemsBySeverity[r._id as keyof typeof problemsBySeverity] = r.count;
+
+    const decisionsByStatus = { pending: 0, approved: 0, rejected: 0, implemented: 0 };
+    for (const r of decisionsByStatusAgg) if (r._id in decisionsByStatus) decisionsByStatus[r._id as keyof typeof decisionsByStatus] = r.count;
+
+    // 30-day session trend, zero-filled so the chart has a continuous axis
+    // rather than gaps on days with no runs.
+    const DAYS = 30;
+    const since = new Date();
+    since.setDate(since.getDate() - (DAYS - 1));
+    since.setHours(0, 0, 0, 0);
+
+    const timelineAgg = await PmxSessionModel.aggregate([
+      { $match: { projectId, userId, createdAt: { $gte: since } } },
+      { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+    ]);
+    const countByDate = new Map(timelineAgg.map((r) => [r._id as string, r.count as number]));
+
+    const sessionsTimeline: Array<{ date: string; count: number }> = [];
+    for (let i = 0; i < DAYS; i++) {
+      const d = new Date(since);
+      d.setDate(d.getDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      sessionsTimeline.push({ date: key, count: countByDate.get(key) ?? 0 });
+    }
+
+    const [recentSessions, recentActivity] = await Promise.all([
+      PmxSessionModel.find({ projectId, userId }).sort({ createdAt: -1 }).limit(5),
+      PmxAuditLogModel.find({ projectId, userId }).sort({ createdAt: -1 }).limit(8),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        totals: { sources, evidence, problems, opportunities, decisions, solutions, tasks, artifacts, sessions },
+        tasksByStatus,
+        problemsBySeverity,
+        decisionsByStatus,
+        sessionsTimeline,
+        avgSessionDurationMs: avgDurationAgg[0]?.avg ?? 0,
+        recentSessions,
+        recentActivity,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 0. PROJECT / PRODUCT LIFECYCLE
+// ==========================================
+
+// Permanently delete a product and cascade the delete across every
+// stage of data scoped to it — sources, understanding, evidence,
+// analysis, problems, opportunities, decisions, solutions, tasks,
+// artifacts, and screenshot workspaces. Audit logs are preserved.
+pmxRouter.delete("/projects/:projectId", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    if (!projectId) {
+      return res.status(400).json({ success: false, error: "projectId is required" });
+    }
+
+    const filter = { projectId, userId: req.userId };
+    const softDelete = { isDeleted: true };
+
+    const [
+      inputs, understanding, evidence, analysis, problems,
+      opportunities, decisions, solutions, tasks, artifacts,
+      screenshots, sessions
+    ] = await Promise.all([
+      PmxInputModel.updateMany(filter, softDelete),
+      PmxUnderstandingModel.updateMany(filter, softDelete),
+      PmxEvidenceModel.updateMany(filter, softDelete),
+      PmxAnalysisModel.updateMany(filter, softDelete),
+      PmxProblemModel.updateMany(filter, softDelete),
+      PmxOpportunityModel.updateMany(filter, softDelete),
+      PmxDecisionModel.updateMany(filter, softDelete),
+      PmxSolutionModel.updateMany(filter, softDelete),
+      PmxExecutionTaskModel.updateMany(filter, softDelete),
+      PmxArtifactModel.updateMany(filter, softDelete),
+      PmxScreenshotProjectModel.updateMany(filter, softDelete),
+      PmxSessionModel.deleteMany(filter),
+    ]);
+
+    await logAudit(
+      req,
+      projectId,
+      "project_deleted",
+      `Deleted product "${projectId}" and all related sources, insights, and execution data.`,
+      "PmxProject",
+      projectId
+    );
+
+    res.json({
+      success: true,
+      message: "Product and all related data deleted successfully.",
+      data: {
+        inputsRemoved: inputs.modifiedCount,
+        understandingRemoved: understanding.modifiedCount,
+        evidenceRemoved: evidence.modifiedCount,
+        analysisRemoved: analysis.modifiedCount,
+        problemsRemoved: problems.modifiedCount,
+        opportunitiesRemoved: opportunities.modifiedCount,
+        decisionsRemoved: decisions.modifiedCount,
+        solutionsRemoved: solutions.modifiedCount,
+        tasksRemoved: tasks.modifiedCount,
+        artifactsRemoved: artifacts.modifiedCount,
+        screenshotsRemoved: screenshots.modifiedCount,
+        sessionsRemoved: sessions.deletedCount,
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ==========================================
 // 1. INPUT SOURCES ENDPOINTS (Stage 1)
@@ -1328,6 +1500,111 @@ pmxRouter.delete("/screenshot-intelligence/:id/annotations/:annId", async (req: 
 
     res.json({ success: true });
   } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 14. IDEA → PRD PIPELINE
+// ==========================================
+// Entirely backend-driven: submit an idea, run the full research → PRD
+// pipeline synchronously, persist it, and let the frontend redirect to
+// /pmx/prd to render the stored result. See services/pmxIdeaPrd.ts.
+
+// Run the pipeline and persist the result
+pmxRouter.post("/idea/generate", async (req: AuthenticatedRequest, res, next) => {
+  const { projectId = "default", idea } = req.body;
+  if (!idea || !idea.trim()) {
+    return res.status(400).json({ success: false, error: "An idea description is required" });
+  }
+
+  let doc;
+  try {
+    doc = await PmxIdeaPrdModel.create({ projectId, userId: req.userId, idea, status: "generating" });
+
+    const result = await generateIdeaPrd(idea);
+
+    doc.status = "completed";
+    doc.markdown = result.markdown;
+    doc.productName = result.productName;
+    doc.stack = result.stack;
+    doc.assumptions = result.assumptions;
+    doc.tokensUsed = result.tokensUsed;
+    doc.aiModel = result.model;
+    doc.version = 1;
+    await doc.save();
+
+    await logAudit(req, projectId, "idea_prd_generated", `Generated execution-ready PRD for idea: "${idea.slice(0, 80)}"`, "PmxIdeaPrd", doc._id.toString());
+
+    res.json({ success: true, data: doc });
+  } catch (err: any) {
+    if (doc) {
+      doc.status = "failed";
+      doc.error = err instanceof TokenBudgetExceededError ? err.message : "PRD generation failed. Please try again.";
+      await doc.save().catch(() => {});
+    }
+    if (err instanceof TokenBudgetExceededError) {
+      return res.status(422).json({ success: false, error: err.message });
+    }
+    next(err);
+  }
+});
+
+// Most recent completed PRD for a project — this is what /pmx/prd loads by default
+pmxRouter.get("/idea/prd/latest", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = (req.query.projectId as string) || "default";
+    const doc = await PmxIdeaPrdModel.findOne({ projectId, userId: req.userId, status: "completed", isDeleted: false }).sort({ createdAt: -1 });
+    res.json({ success: true, data: doc });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Fetch a specific generated PRD by id
+pmxRouter.get("/idea/prd/:id", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const doc = await PmxIdeaPrdModel.findOne({ _id: req.params.id, userId: req.userId, isDeleted: false });
+    if (!doc) return res.status(404).json({ success: false, error: "PRD not found" });
+    res.json({ success: true, data: doc });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// AI prompt bar / theme controls — edit the PRD in place rather than
+// regenerating it. Powers both free-text refinements and Theme Control
+// dropdown changes (the frontend synthesizes an instruction for those).
+pmxRouter.post("/idea/prd/:id/refine", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { instruction } = req.body;
+    if (!instruction || !instruction.trim()) {
+      return res.status(400).json({ success: false, error: "An instruction is required" });
+    }
+
+    const doc = await PmxIdeaPrdModel.findOne({ _id: req.params.id, userId: req.userId, isDeleted: false });
+    if (!doc) return res.status(404).json({ success: false, error: "PRD not found" });
+    if (doc.status !== "completed") {
+      return res.status(409).json({ success: false, error: "This PRD isn't ready to edit yet" });
+    }
+
+    const result = await refineIdeaPrd(doc.markdown, doc.stack, instruction);
+
+    doc.markdown = result.markdown;
+    doc.stack = result.stack;
+    doc.version += 1;
+    doc.tokensUsed += result.tokensUsed;
+    doc.history.push({ role: "user", content: instruction, createdAt: new Date() });
+    doc.history.push({ role: "assistant", content: result.changeSummary, createdAt: new Date() });
+    await doc.save();
+
+    await logAudit(req, doc.projectId, "idea_prd_refined", `Refined PRD (v${doc.version}): "${instruction.slice(0, 80)}"`, "PmxIdeaPrd", doc._id.toString());
+
+    res.json({ success: true, data: doc, changeSummary: result.changeSummary });
+  } catch (err: any) {
+    if (err instanceof TokenBudgetExceededError) {
+      return res.status(422).json({ success: false, error: err.message });
+    }
     next(err);
   }
 });

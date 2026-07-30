@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -7,6 +7,7 @@ import {
   ArrowRight, CheckCircle2, Loader2, ExternalLink, Zap, Circle, Lock
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import PrdWorkspace from "@/components/pmx/PrdWorkspace";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
@@ -41,6 +42,23 @@ type DevelopStage = "idle" | "connect" | "running" | "done";
 export default function PmxPrd() {
   const { solutions, fetchSolutions, fetchTasks } = usePmxStore();
   const { toast } = useToast();
+
+  // Idea → PRD pipeline output takes priority over the legacy Solution
+  // Studio list below when one exists for this project.
+  const [ideaPrd, setIdeaPrd] = useState<any>(null);
+  const [ideaPrdChecked, setIdeaPrdChecked] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const headers = await getPmxHeaders();
+        const res = await fetch(`${API_URL}/pmx/idea/prd/latest`, { headers });
+        const json = await res.json();
+        if (json.success && json.data) setIdeaPrd(json.data);
+      } catch { /* fall through to legacy solutions view */ }
+      finally { setIdeaPrdChecked(true); }
+    })();
+  }, []);
 
   const [activeSolutionId, setActiveSolutionId] = useState<string | null>(null);
   const [activeTab, setActiveTab]               = useState<TabId>("summary");
@@ -250,6 +268,18 @@ export default function PmxPrd() {
     );
   };
 
+  if (ideaPrd) {
+    return (
+      <div className="flex h-[calc(100vh-3.5rem)] bg-background">
+        <PrdWorkspace doc={ideaPrd} />
+      </div>
+    );
+  }
+
+  if (!ideaPrdChecked) {
+    return <div className="flex h-[calc(100vh-3.5rem)] bg-background" />;
+  }
+
   return (
     <div className="flex h-[calc(100vh-3.5rem)] bg-background">
 
@@ -312,8 +342,8 @@ export default function PmxPrd() {
               )}
               {/* Go to Develop CTA */}
               <button onClick={handleGoToDevelop}
-                className="flex items-center gap-1.5 rounded-lg bg-green-500 hover:bg-green-400 px-4 py-1.5 text-xs font-bold text-black transition-all shadow-[0_0_12px_rgba(34,197,94,0.25)]">
-                <Zap className="h-3.5 w-3.5" /> Go to Develop
+                className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 px-4 py-1.5 text-xs font-bold text-black transition-all shadow-[0_0_12px_rgba(14,165,233,0.25)]">
+                <img src="/assets/images/strx_black.png" alt="" className="h-7 w-7 object-contain" /> Go to Develop
               </button>
             </div>
           </div>

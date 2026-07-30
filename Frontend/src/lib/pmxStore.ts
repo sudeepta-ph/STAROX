@@ -203,6 +203,7 @@ interface PmxStore {
   runPipeline: (selectedSourceIds?: string[]) => Promise<void>;
   selectedSourceIds: string[];
   setSelectedSourceIds: (ids: string[]) => void;
+  deleteProject: (projectId?: string) => Promise<boolean>;
 }
 
 export const usePmxStore = create<PmxStore>((set, get) => ({
@@ -430,6 +431,38 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
       console.error(err);
     } finally {
       set((state) => ({ loading: { ...state.loading, pipeline: false } }));
+    }
+  },
+
+  deleteProject: async (projectId) => {
+    const id = projectId || get().projectId;
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({
+          inputs: [],
+          understanding: null,
+          evidence: [],
+          analysis: [],
+          problems: [],
+          opportunities: [],
+          decisions: [],
+          solutions: [],
+          tasks: [],
+          artifacts: [],
+          history: []
+        });
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error(err);
+      return false;
     }
   }
 }));

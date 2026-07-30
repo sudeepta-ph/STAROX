@@ -35,6 +35,35 @@ const envSchema = z.object({
   DISCORD_BOT_TOKEN:  z.string().optional(),
   DISCORD_CHANNEL_ID: z.string().optional(),
 
+  // ── GitHub OAuth (PMX source import) ────────────────────────────────────────
+  GITHUB_CLIENT_ID:     z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+  GITHUB_REDIRECT_URI:  z.string().optional(),
+
+  // ── Google OAuth (GA4 connector) ────────────────────────────────────────────
+  GOOGLE_CLIENT_ID:     z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_REDIRECT_URI:  z.string().optional(),
+
+  // ── Notion OAuth ─────────────────────────────────────────────────────────────
+  NOTION_CLIENT_ID:     z.string().optional(),
+  NOTION_CLIENT_SECRET: z.string().optional(),
+  NOTION_REDIRECT_URI:  z.string().optional(),
+
+  // ── Slack OAuth (PMX connector) ─────────────────────────────────────────────
+  // Distinct from SLACK_BOT_TOKEN/SLACK_CHANNEL_ID above, which are the
+  // server-side fallback for the /integrations/slack aggregate-analysis
+  // route. These are the OAuth app credentials for the per-user PMX
+  // connector (/connectors → Slack → Connect).
+  SLACK_CLIENT_ID:     z.string().optional(),
+  SLACK_CLIENT_SECRET: z.string().optional(),
+  SLACK_REDIRECT_URI:  z.string().optional(),
+
+  // ── Token encryption (at-rest OAuth token storage) ──────────────────────────
+  // 32-byte key, hex-encoded (64 hex chars) — generate with:
+  //   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  TOKEN_ENCRYPTION_KEY: z.string().optional(),
+
   // ── Clerk ───────────────────────────────────────────────────────────────────
   CLERK_PUBLISHABLE_KEY:             z.string().optional(),
   CLERK_SECRET_KEY:                  z.string().optional(),

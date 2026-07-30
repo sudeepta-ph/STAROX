@@ -727,3 +727,233 @@ const PmxSessionSchema = new Schema<IPmxSession>(
 );
 
 export const PmxSessionModel = mongoose.model<IPmxSession>("PmxSession", PmxSessionSchema);
+
+// ==========================================
+// 14. GITHUB OAUTH CONNECTION MODEL
+// ==========================================
+export interface IPmxGithubConnection extends Document {
+  userId: string;
+  accessToken: string;
+  githubId: number;
+  githubLogin: string;
+  avatarUrl?: string;
+  scope?: string;
+  connectedAt: Date;
+}
+
+const PmxGithubConnectionSchema = new Schema<IPmxGithubConnection>(
+  {
+    userId: { type: String, required: true, unique: true, index: true },
+    accessToken: { type: String, required: true },
+    githubId: { type: Number, required: true },
+    githubLogin: { type: String, required: true },
+    avatarUrl: { type: String },
+    scope: { type: String },
+    connectedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+
+export const PmxGithubConnectionModel = mongoose.model<IPmxGithubConnection>("PmxGithubConnection", PmxGithubConnectionSchema);
+
+// ==========================================
+// 15. GENERIC CONNECTOR CREDENTIALS (API-key/token based integrations)
+// ==========================================
+export interface IPmxConnectorCredential extends Document {
+  userId: string;
+  connectorId: string;
+  credentials: Record<string, string>;
+  label?: string;
+  connectedAt: Date;
+}
+
+const PmxConnectorCredentialSchema = new Schema<IPmxConnectorCredential>(
+  {
+    userId: { type: String, required: true, index: true },
+    connectorId: { type: String, required: true, index: true },
+    credentials: { type: Schema.Types.Mixed, required: true },
+    label: { type: String },
+    connectedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+PmxConnectorCredentialSchema.index({ userId: 1, connectorId: 1 }, { unique: true });
+
+export const PmxConnectorCredentialModel = mongoose.model<IPmxConnectorCredential>("PmxConnectorCredential", PmxConnectorCredentialSchema);
+
+// ==========================================
+// 16. IDEA → PRD PIPELINE (Development PRD workspace)
+// ==========================================
+// `markdown` is the entire PRD as one document — headings, tables, code
+// fences, mermaid diagrams, everything — rendered client-side in
+// components/pmx/PrdWorkspace.tsx. `stack` mirrors the current Theme
+// Controls selection so the UI can show them without re-parsing prose.
+// Each AI prompt-bar refinement rewrites `markdown`/`stack` in place and
+// appends to `history`; `version` increments per refinement.
+export interface IPmxIdeaPrdStack {
+  frontend?: string;
+  backend?: string;
+  database?: string;
+  cloud?: string;
+  authProvider?: string;
+  aiProvider?: string;
+  architecture?: string;
+}
+
+export interface IPmxIdeaPrd extends Document {
+  projectId: string;
+  userId: string;
+  idea: string;
+  productName?: string;
+  status: "generating" | "completed" | "failed";
+  error?: string;
+  markdown: string;
+  stack: IPmxIdeaPrdStack;
+  assumptions: string[];
+  history: Array<{ role: "user" | "assistant"; content: string; createdAt: Date }>;
+  version: number;
+  tokensUsed: number;
+  aiModel: string;
+  isDeleted: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PmxIdeaPrdSchema = new Schema<IPmxIdeaPrd>(
+  {
+    projectId: { type: String, required: true, index: true },
+    userId: { type: String, required: true, index: true },
+    idea: { type: String, required: true },
+    productName: { type: String },
+    status: { type: String, enum: ["generating", "completed", "failed"], default: "generating" },
+    error: { type: String },
+    markdown: { type: String, default: "" },
+    stack: {
+      frontend: { type: String },
+      backend: { type: String },
+      database: { type: String },
+      cloud: { type: String },
+      authProvider: { type: String },
+      aiProvider: { type: String },
+      architecture: { type: String },
+    },
+    assumptions: [{ type: String }],
+    history: [
+      {
+        role: { type: String, enum: ["user", "assistant"] },
+        content: { type: String },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    version: { type: Number, default: 1 },
+    tokensUsed: { type: Number, default: 0 },
+    aiModel: { type: String },
+    isDeleted: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
+export const PmxIdeaPrdModel = mongoose.model<IPmxIdeaPrd>("PmxIdeaPrd", PmxIdeaPrdSchema);
+
+// ==========================================
+// 17. GOOGLE OAUTH CONNECTION (GA4 connector)
+// ==========================================
+export interface IPmxGoogleConnection extends Document {
+  userId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: Date;
+  email?: string;
+  propertyId?: string;
+  propertyName?: string;
+  scope?: string;
+  connectedAt: Date;
+}
+
+const PmxGoogleConnectionSchema = new Schema<IPmxGoogleConnection>(
+  {
+    userId: { type: String, required: true, unique: true, index: true },
+    accessToken: { type: String, required: true },
+    refreshToken: { type: String, required: true },
+    expiresAt: { type: Date, required: true },
+    email: { type: String },
+    propertyId: { type: String },
+    propertyName: { type: String },
+    scope: { type: String },
+    connectedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+
+export const PmxGoogleConnectionModel = mongoose.model<IPmxGoogleConnection>("PmxGoogleConnection", PmxGoogleConnectionSchema);
+
+// ==========================================
+// 18. NOTION OAUTH CONNECTION
+// ==========================================
+export interface IPmxNotionConnection extends Document {
+  userId: string;
+  accessToken: string;
+  botId: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  workspaceIcon?: string;
+  ownerName?: string;
+  connectedAt: Date;
+}
+
+const PmxNotionConnectionSchema = new Schema<IPmxNotionConnection>(
+  {
+    userId: { type: String, required: true, unique: true, index: true },
+    accessToken: { type: String, required: true },
+    botId: { type: String, required: true },
+    workspaceId: { type: String },
+    workspaceName: { type: String },
+    workspaceIcon: { type: String },
+    ownerName: { type: String },
+    connectedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+
+export const PmxNotionConnectionModel = mongoose.model<IPmxNotionConnection>("PmxNotionConnection", PmxNotionConnectionSchema);
+
+// ==========================================
+// 19. SLACK OAUTH CONNECTION
+// ==========================================
+// accessToken/refreshToken are stored encrypted (see lib/tokenCrypto.ts) —
+// callers must encrypt before save and decrypt after read; the schema
+// intentionally has no knowledge of that, it just stores opaque strings.
+export interface IPmxSlackConnection extends Document {
+  userId: string;
+  accessToken: string;
+  refreshToken?: string;
+  tokenExpiresAt?: Date;
+  teamId: string;
+  teamName: string;
+  teamIcon?: string;
+  botUserId: string;
+  appId: string;
+  scope?: string;
+  authedUserId?: string;
+  connectedAt: Date;
+}
+
+const PmxSlackConnectionSchema = new Schema<IPmxSlackConnection>(
+  {
+    userId: { type: String, required: true, unique: true, index: true },
+    accessToken: { type: String, required: true },
+    refreshToken: { type: String },
+    tokenExpiresAt: { type: Date },
+    teamId: { type: String, required: true },
+    teamName: { type: String, required: true },
+    teamIcon: { type: String },
+    botUserId: { type: String, required: true },
+    appId: { type: String, required: true },
+    scope: { type: String },
+    authedUserId: { type: String },
+    connectedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+
+export const PmxSlackConnectionModel = mongoose.model<IPmxSlackConnection>("PmxSlackConnection", PmxSlackConnectionSchema);

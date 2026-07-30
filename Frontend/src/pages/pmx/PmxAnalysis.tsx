@@ -7,7 +7,7 @@ import {
   MousePointer2, Navigation, Layout, Puzzle, Accessibility,
   Smartphone, GitBranch, Zap, PanelLeftClose, PanelLeftOpen,
   PanelRightClose, PanelRightOpen, Plus, ImagePlus, Info,
-  History, Clock, Trash2,
+  History, Clock, Trash2, ArrowRight,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import WebsiteViewer from "@/components/WebsiteViewer";
@@ -414,127 +414,33 @@ export default function PmxAnalysis() {
   return (
     <div className="flex flex-col h-full overflow-hidden" onPaste={handlePaste}>
 
-      {/* ── TOP BAR ───────────────────────────────────────────────────────── */}
-      <div className="shrink-0 px-6 pt-5 pb-4 space-y-3 border-b border-zinc-900 bg-background">
-        {/* Title row */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-bold text-white flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-sky-400" /> UI Intelligence Agent
-            </h1>
-            <p className="text-[11px] text-zinc-500 mt-0.5">
-              What is wrong with this UI, and what should change? Prioritized UI/UX issues only.
-            </p>
-          </div>
-          {/* Show "New Audit" when already in workspace */}
-          {(previewUrl || uploadedImage) && (
-            <button
-              onClick={() => {
-                setResult(null); setPreviewUrl(""); setUploadedImage(null);
-                setUrlInput(""); setEnhanceScreens([]); setShowEnhancePanel(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-xs text-zinc-400 hover:text-white transition-colors shrink-0"
-            >
-              <RefreshCw className="h-3 w-3" /> New Audit
-            </button>
-          )}
+      {/* ── COMPACT TOP BAR (shown only when in workspace) ─────────────────── */}
+      {showSplit && (
+        <div className="shrink-0 px-4 py-2 flex items-center gap-2 border-b border-zinc-900 bg-background">
+          <Globe className="h-3 w-3 text-zinc-600 shrink-0" />
+          <input type="url" placeholder="https://yourproduct.com"
+            value={urlInput}
+            onChange={e => setUrlInput(e.target.value)}
+            onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
+            onKeyDown={e => e.key === "Enter" && runAudit()}
+            className="flex-1 bg-transparent text-xs text-zinc-300 focus:outline-none placeholder-zinc-600"
+          />
+          <button
+            onClick={() => {
+              setResult(null); setPreviewUrl(""); setUploadedImage(null);
+              setUrlInput(""); setEnhanceScreens([]); setShowEnhancePanel(false);
+            }}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-zinc-800 hover:bg-zinc-900 text-[11px] text-zinc-400 hover:text-white transition-colors shrink-0"
+          >
+            <RefreshCw className="h-3 w-3" /> New Audit
+          </button>
+          <button onClick={runAudit} disabled={running || !urlInput.trim()}
+            className="flex items-center gap-1 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-3 py-1.5 text-[11px] font-semibold text-black transition-all shrink-0"
+          >
+            <Sparkles className="h-3 w-3" /> Re-audit
+          </button>
         </div>
-
-        {/* Input card — hidden once audit starts */}
-        <AnimatePresence>
-          {showInputCard && (
-            <motion.div
-              initial={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
-            >
-              <div className="rounded-xl border border-zinc-900 bg-zinc-950 p-4 space-y-3">
-                {/* Tabs */}
-                <div className="flex rounded-lg border border-zinc-800 p-0.5 bg-zinc-900/40 w-fit">
-                  {(["url","upload"] as const).map(t => (
-                    <button key={t} onClick={() => setActiveTab(t)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold transition-all ${
-                        activeTab === t ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300"
-                      }`}
-                    >
-                      {t === "url"
-                        ? <><Globe className="h-3.5 w-3.5" /> Live URL</>
-                        : <><Upload className="h-3.5 w-3.5" /> Screenshot</>}
-                    </button>
-                  ))}
-                </div>
-
-                {/* URL tab */}
-                {activeTab === "url" && (
-                  <div className="flex gap-2">
-                    <input type="url" placeholder="https://yourproduct.com"
-                      value={urlInput}
-                      onChange={e => setUrlInput(e.target.value)}
-                      onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
-                      onKeyDown={e => e.key === "Enter" && runAudit()}
-                      className="flex-1 bg-[#18181b] border border-zinc-800 focus:border-zinc-600 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
-                    />
-                    <button onClick={runAudit} disabled={running || !urlInput.trim()}
-                      className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-black transition-all shrink-0"
-                    >
-                      <Sparkles className="h-3.5 w-3.5" /> Audit UI
-                    </button>
-                  </div>
-                )}
-
-                {/* Screenshot tab */}
-                {activeTab === "upload" && (
-                  <div className="flex items-center gap-3">
-                    {uploadedImage ? (
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <img src={uploadedImage.dataUrl} alt="" className="h-8 w-12 object-cover rounded border border-zinc-800 shrink-0" />
-                        <span className="text-[11px] text-zinc-300 truncate flex-1">{uploadedImage.label}</span>
-                        <button onClick={() => setUploadedImage(null)} className="text-zinc-500 hover:text-red-400 transition-colors shrink-0">
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div onClick={() => fileRef.current?.click()}
-                        className="flex-1 border border-dashed border-zinc-800 hover:border-zinc-600 rounded-lg px-4 py-2.5 text-center cursor-pointer transition-all"
-                      >
-                        <p className="text-[11px] text-zinc-500">Click to upload or paste (Ctrl+V) — PNG, JPG, WEBP</p>
-                        <input ref={fileRef} type="file" accept="image/*" onChange={handleInitialFileSelect} className="hidden" />
-                      </div>
-                    )}
-                    <button onClick={runAudit} disabled={running || !uploadedImage}
-                      className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-black transition-all shrink-0"
-                    >
-                      <Sparkles className="h-3.5 w-3.5" /> Audit Screenshot
-                    </button>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Inline URL bar shown when already in workspace */}
-        {!showInputCard && !running && (
-          <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5">
-              <Globe className="h-3 w-3 text-zinc-600 shrink-0" />
-              <input type="url" placeholder="https://yourproduct.com"
-                value={urlInput}
-                onChange={e => setUrlInput(e.target.value)}
-                onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
-                onKeyDown={e => e.key === "Enter" && runAudit()}
-                className="flex-1 bg-transparent text-xs text-zinc-300 focus:outline-none placeholder-zinc-600"
-              />
-            </div>
-            <button onClick={runAudit} disabled={running || !urlInput.trim()}
-              className="flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-3 py-1.5 text-xs font-semibold text-black transition-all shrink-0"
-            >
-              <Sparkles className="h-3 w-3" /> Re-audit
-            </button>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* ── SPLIT WORKSPACE ───────────────────────────────────────────────── */}
       {showSplit ? (
@@ -847,13 +753,106 @@ export default function PmxAnalysis() {
         </div>
 
       ) : (
-        /* Empty state — no URL yet */
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
-          <Globe className="h-10 w-10 text-zinc-800" />
-          <p className="text-sm font-semibold text-zinc-500">Enter a URL to begin</p>
-          <p className="text-[11px] text-zinc-600 max-w-sm leading-relaxed">
-            Type a live URL above and click Audit UI. The website preview and AI analysis appear side by side.
-          </p>
+        /* ── HERO LANDING ─────────────────────────────────────────────────── */
+        <div className="flex-1 relative flex flex-col items-center justify-center overflow-hidden">
+
+          {/* Ambient bottom glow */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute bottom-0 left-0 right-0 h-72 -z-0"
+            style={{
+              background:
+                "radial-gradient(ellipse 90% 100% at 50% 100%, rgba(56,189,248,0.18) 0%, transparent 70%)",
+            }}
+          />
+
+          {/* Content */}
+          <div className="relative z-10 flex flex-col items-center text-center px-6 w-full max-w-2xl">
+            <motion.h1
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="text-4xl sm:text-5xl font-extrabold text-foreground tracking-tight mb-3"
+            >
+              How good is your product experience?
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+              className="text-muted-foreground text-sm mb-10"
+            >
+              Detect UX issues, prioritize fixes, and ship better experiences.
+            </motion.p>
+
+            {/* Input card */}
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full rounded-2xl bg-card backdrop-blur-md shadow-2xl overflow-hidden border border-border"
+            >
+              {/* Text input area */}
+              {activeTab === "url" ? (
+                <input
+                  type="url"
+                  placeholder="https://yourproduct.com"
+                  value={urlInput}
+                  onChange={e => setUrlInput(e.target.value)}
+                  onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
+                  onKeyDown={e => e.key === "Enter" && runAudit()}
+                  className="w-full bg-transparent px-5 pt-4 pb-2 text-sm text-foreground focus:outline-none placeholder:text-muted-foreground"
+                />
+              ) : (
+                <div className="px-5 pt-4 pb-2">
+                  {uploadedImage ? (
+                    <div className="flex items-center gap-2">
+                      <img src={uploadedImage.dataUrl} alt="" className="h-8 w-12 object-cover rounded border border-border shrink-0" />
+                      <span className="text-sm text-foreground truncate flex-1">{uploadedImage.label}</span>
+                      <button onClick={() => setUploadedImage(null)} className="text-muted-foreground hover:text-red-400 transition-colors shrink-0">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => fileRef.current?.click()}
+                      className="cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      Click to upload a screenshot — PNG, JPG, WEBP
+                      <input ref={fileRef} type="file" accept="image/*" onChange={handleInitialFileSelect} className="hidden" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Bottom toolbar */}
+              <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                {/* Left: mode toggle */}
+                <div className="flex rounded-lg border border-border p-0.5 bg-muted/40">
+                  {(["url","upload"] as const).map(t => (
+                    <button key={t} onClick={() => setActiveTab(t)}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                        activeTab === t ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t === "url" ? <><Globe className="h-3 w-3" /> Live URL</> : <><Upload className="h-3 w-3" /> Screenshot</>}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Right: audit button */}
+                <button
+                  onClick={runAudit}
+                  disabled={running || (activeTab === "url" ? !urlInput.trim() : !uploadedImage)}
+                  className="flex items-center justify-center h-8 w-8 rounded-full bg-sky-500 hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg"
+                >
+                  {running
+                    ? <div className="h-3.5 w-3.5 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                    : <ArrowRight className="h-4 w-4 text-black" />}
+                </button>
+              </div>
+            </motion.div>
+          </div>
         </div>
       )}
 

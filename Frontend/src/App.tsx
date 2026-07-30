@@ -19,6 +19,7 @@ import Help from "@/pages/Help";
 import Notifications from "@/pages/Notifications";
 import Profile from "@/pages/Profile";
 import Privacy from "@/pages/Privacy";
+import Terms from "@/pages/Terms";
 import Teams from "@/pages/Teams";
 import TeamsEdits from "@/pages/TeamsEdits";
 import TeamsTeamX from "@/pages/TeamsTeamX";
@@ -58,7 +59,7 @@ if (!CLERK_PUBLISHABLE_KEY) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY in environment variables.");
 }
 
-// Helper component to sync Clerk Auth state and fetch role from Supabase DB
+// Helper component to sync Clerk Auth state and fetch role from the backend (MongoDB)
 function ClerkAuthSync() {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser();
   const { setUser, setLoading } = useAuthStore();
@@ -131,7 +132,7 @@ function ProtectedRoute() {
       <div className="h-screen w-screen bg-background relative overflow-hidden flex items-center justify-center font-sans">
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_65%_at_5%_0%,rgba(90,189,255,0.06)_0%,transparent_50%)]" />
         <div className="text-center space-y-4 max-w-sm px-6 relative z-10">
-          <img src="/strx.png" alt="STAROX Logo" className="h-10 w-10 mx-auto object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
+          <img src="/assets/images/strx.png" alt="STAROX Logo" className="h-10 w-10 mx-auto object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
           <h2 className="text-lg font-bold text-white font-display">Authentication Required</h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
             Please sign in to access the STAROX Intelligence workspace and strategic tools.
@@ -203,6 +204,8 @@ export default function App() {
             <Route path="/automation" element={<ComingSoon title="STAROX AUTOMATION" description="Business & AI automations that eliminate repetitive work. Connect your tools, trigger intelligent workflows, and scale without the overhead — coming soon." />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/help" element={<Help />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
 
             {/* Protected Workspace Routes */}
             <Route element={<ProtectedRoute />}>
@@ -213,10 +216,10 @@ export default function App() {
               <Route path="/agents" element={<Agents />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/analytics" element={<Analytics />} />
+              <Route path="/connectors" element={<Connectors />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/profile" element={<Profile />} />
-              <Route path="/privacy" element={<Privacy />} />
 
               {/* Protected Admin Blog Routes */}
               <Route path="/admin/blog" element={<AdminRoute><AdminBlogDashboard /></AdminRoute>} />

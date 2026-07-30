@@ -16,14 +16,13 @@ const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/
 function ConfidenceRing({ value }: { value: number }) {
   const r = 16, circ = 2 * Math.PI * r;
   const fill = circ - (value / 100) * circ;
-  const color = value >= 80 ? "#22c55e" : value >= 60 ? "#eab308" : "#ef4444";
   return (
     <svg width="40" height="40" viewBox="0 0 40 40" className="shrink-0">
       <circle cx="20" cy="20" r={r} fill="none" stroke="currentColor" strokeWidth="3" className="text-border/50" />
-      <circle cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="3"
+      <circle cx="20" cy="20" r={r} fill="none" stroke="hsl(var(--primary))" strokeWidth="3"
         strokeDasharray={circ} strokeDashoffset={fill} strokeLinecap="round"
         transform="rotate(-90 20 20)" />
-      <text x="20" y="24" textAnchor="middle" fontSize="9" fontWeight="700" fill={color}>{value}%</text>
+      <text x="20" y="24" textAnchor="middle" fontSize="9" fontWeight="700" fill="hsl(var(--primary))">{value}%</text>
     </svg>
   );
 }
@@ -39,10 +38,10 @@ function EvidencePill({ icon: Icon, label, color }: { icon: any; label: string; 
 
 // ── Step badge ────────────────────────────────────────────────────
 const STEPS = [
-  { id: "evidence",    label: "Evidence",    color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
-  { id: "problem",     label: "Problem",     color: "text-red-400",    bg: "bg-red-500/10",    border: "border-red-500/20" },
-  { id: "opportunity", label: "Opportunity", color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20" },
-  { id: "decision",    label: "Recommendation", color: "text-sky-400", bg: "bg-sky-500/10",    border: "border-sky-500/20" },
+  { id: "evidence",    label: "Evidence",    color: "text-primary", bg: "bg-primary/10", border: "border-primary/20" },
+  { id: "problem",     label: "Problem",     color: "text-primary", bg: "bg-primary/10", border: "border-primary/20" },
+  { id: "opportunity", label: "Opportunity", color: "text-primary", bg: "bg-primary/10", border: "border-primary/20" },
+  { id: "decision",    label: "Recommendation", color: "text-primary", bg: "bg-primary/10", border: "border-primary/20" },
 ];
 
 type ActiveFilter = "all" | "pending" | "approved" | "rejected";
@@ -139,7 +138,7 @@ export default function PmxInsights() {
           </div>
         ))}
         <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border border-green-500/20 bg-green-500/10 text-green-400 shrink-0">PRD</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border border-primary/20 bg-primary/10 text-primary shrink-0">PRD</span>
       </div>
 
       {/* ── FILTERS & SEARCH ────────────────────────────────────── */}
@@ -195,7 +194,7 @@ export default function PmxInsights() {
           return (
             <motion.div key={dec._id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
               className={`rounded-2xl border bg-card/40 overflow-hidden transition-all ${
-                isApproved ? "border-green-500/20" : isRejected ? "border-border/30 opacity-60" : "border-border/50 hover:border-border"
+                isApproved ? "border-primary/20" : isRejected ? "border-border/30 opacity-60" : "border-border/50 hover:border-border"
               }`}>
 
               {/* ── TOP: Status + Title + Confidence ── */}
@@ -204,16 +203,10 @@ export default function PmxInsights() {
                   <ConfidenceRing value={dec.confidence} />
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                      <span className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
-                        dec.category === "build"   ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
-                        dec.category === "improve" ? "bg-green-500/10 border-green-500/20 text-green-400" :
-                        dec.category === "optimize"? "bg-teal-500/10 border-teal-500/20 text-teal-400" :
-                        dec.category === "remove"  ? "bg-red-500/10 border-red-500/20 text-red-400" :
-                        "bg-purple-500/10 border-purple-500/20 text-purple-400"
-                      }`}>{dec.category}</span>
-                      {isApproved && <span className="flex items-center gap-1 text-[9px] font-semibold text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full"><CheckCircle2 className="h-2.5 w-2.5" />Approved</span>}
+                      <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border bg-primary/10 border-primary/20 text-primary">{dec.category}</span>
+                      {isApproved && <span className="flex items-center gap-1 text-[9px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full"><CheckCircle2 className="h-2.5 w-2.5" />Approved</span>}
                       {isRejected && <span className="text-[9px] font-semibold text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">Rejected</span>}
-                      {isPending  && <span className="flex items-center gap-1 text-[9px] font-semibold text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded-full"><Circle className="h-2 w-2 fill-current" />Pending Review</span>}
+                      {isPending  && <span className="flex items-center gap-1 text-[9px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full"><Circle className="h-2 w-2 fill-current" />Pending Review</span>}
                     </div>
                     <h3 className="text-sm font-bold text-foreground leading-snug">{dec.title}</h3>
                     <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">{dec.reasoning}</p>
@@ -225,11 +218,11 @@ export default function PmxInsights() {
                       <>
                         <div className="text-center">
                           <p className="text-[8px] text-muted-foreground uppercase tracking-wider">Impact</p>
-                          <p className="text-sm font-bold font-mono text-yellow-400">{linkedOpp.userImpact}/10</p>
+                          <p className="text-sm font-bold font-mono text-primary">{linkedOpp.userImpact}/10</p>
                         </div>
                         <div className="text-center">
                           <p className="text-[8px] text-muted-foreground uppercase tracking-wider">Effort</p>
-                          <p className="text-sm font-bold font-mono text-orange-400">{linkedOpp.effort}/10</p>
+                          <p className="text-sm font-bold font-mono text-primary">{linkedOpp.effort}/10</p>
                         </div>
                         <div className="text-center">
                           <p className="text-[8px] text-muted-foreground uppercase tracking-wider">RICE</p>
@@ -248,17 +241,11 @@ export default function PmxInsights() {
                       ev.category === "behavior"    ? TrendingUp :
                       ev.category === "business"    ? DollarSign :
                       ev.category === "engineering" ? Cpu : BarChart3
-                    } label={ev.title.slice(0, 28)} color={
-                      ev.category === "customer"    ? "bg-green-500/5 border-green-500/20 text-green-400" :
-                      ev.category === "behavior"    ? "bg-blue-500/5 border-blue-500/20 text-blue-400" :
-                      ev.category === "business"    ? "bg-yellow-500/5 border-yellow-500/20 text-yellow-400" :
-                      ev.category === "engineering" ? "bg-purple-500/5 border-purple-500/20 text-purple-400" :
-                      "bg-muted/50 border-border text-muted-foreground"
-                    } />
+                    } label={ev.title.slice(0, 28)} color="bg-primary/5 border-primary/20 text-primary" />
                   ))}
                   {linkedProbs.slice(0, 1).map((p, i) => (
                     <EvidencePill key={`p-${i}`} icon={AlertTriangle} label={p.title.slice(0, 28)}
-                      color={p.severity === "critical" ? "bg-red-500/5 border-red-500/20 text-red-400" : "bg-orange-500/5 border-orange-500/20 text-orange-400"} />
+                      color="bg-primary/5 border-primary/20 text-primary" />
                   ))}
                 </div>
 
@@ -273,7 +260,7 @@ export default function PmxInsights() {
                   {isPending && (
                     <>
                       <button onClick={() => handleReject(dec._id, dec.title)} disabled={updatingId === dec._id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:border-destructive/30 hover:bg-destructive/5 text-muted-foreground hover:text-destructive transition-all text-xs">
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:border-foreground/30 hover:bg-muted text-muted-foreground hover:text-foreground transition-all text-xs">
                         <ThumbsDown className="h-3 w-3" /> Reject
                       </button>
                       <button onClick={() => handleGeneratePrd(dec._id, dec.title)} disabled={updatingId === dec._id}
@@ -290,7 +277,7 @@ export default function PmxInsights() {
                   )}
                   {isApproved && (
                     <button onClick={() => navigate("/pmx/prd")}
-                      className="flex items-center gap-1.5 rounded-lg border border-green-500/20 bg-green-500/5 hover:bg-green-500/10 px-3.5 py-1.5 text-xs font-semibold text-green-400 transition-all">
+                      className="flex items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/5 hover:bg-primary/10 px-3.5 py-1.5 text-xs font-semibold text-primary transition-all">
                       <FileText className="h-3 w-3" /> Open PRD <ArrowRight className="h-3 w-3" />
                     </button>
                   )}
@@ -307,9 +294,9 @@ export default function PmxInsights() {
                       {/* Left: full reasoning chain */}
                       <div className="space-y-4">
                         <div className="space-y-1.5">
-                          <p className="text-[10px] text-red-400 uppercase tracking-wider font-bold flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Problem Detected</p>
+                          <p className="text-[10px] text-primary uppercase tracking-wider font-bold flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Problem Detected</p>
                           {linkedProbs.length > 0 ? linkedProbs.map((p, i) => (
-                            <div key={i} className="rounded-lg bg-red-500/5 border border-red-500/10 p-3 space-y-1">
+                            <div key={i} className="rounded-lg bg-primary/5 border border-primary/10 p-3 space-y-1">
                               <p className="text-xs font-semibold text-foreground">{p.title}</p>
                               <p className="text-[10px] text-muted-foreground leading-relaxed">{p.description}</p>
                               {p.suggestedFix && <p className="text-[10px] text-primary/80 italic">{p.suggestedFix}</p>}
@@ -341,11 +328,11 @@ export default function PmxInsights() {
                       <div className="space-y-4">
                         {linkedEvid.length > 0 && (
                           <div className="space-y-2">
-                            <p className="text-[10px] text-purple-400 uppercase tracking-wider font-bold flex items-center gap-1"><Users className="h-3 w-3" />Customer Evidence</p>
+                            <p className="text-[10px] text-primary uppercase tracking-wider font-bold flex items-center gap-1"><Users className="h-3 w-3" />Customer Evidence</p>
                             {linkedEvid.slice(0, 2).map((ev, i) => (
-                              <div key={i} className="rounded-lg bg-purple-500/5 border border-purple-500/10 p-3 space-y-1">
+                              <div key={i} className="rounded-lg bg-primary/5 border border-primary/10 p-3 space-y-1">
                                 <p className="text-xs font-semibold text-foreground">{ev.title}</p>
-                                {ev.quote && <p className="text-[10px] text-muted-foreground italic pl-2 border-l border-purple-500/20">"{ev.quote}"</p>}
+                                {ev.quote && <p className="text-[10px] text-muted-foreground italic pl-2 border-l border-primary/20">"{ev.quote}"</p>}
                                 <p className="text-[10px] text-muted-foreground leading-relaxed">{ev.description}</p>
                               </div>
                             ))}
@@ -367,9 +354,9 @@ export default function PmxInsights() {
                           {linkedOpp && (
                             <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/30">
                               {[
-                                { label: "Impact", value: `${linkedOpp.userImpact}/10`, color: "text-blue-400" },
+                                { label: "Impact", value: `${linkedOpp.userImpact}/10`, color: "text-primary" },
                                 { label: "RICE",   value: linkedOpp.riceScore,           color: "text-primary" },
-                                { label: "Risk",   value: linkedOpp.risk,                color: linkedOpp.risk === "high" ? "text-red-400" : linkedOpp.risk === "medium" ? "text-yellow-400" : "text-green-400" },
+                                { label: "Risk",   value: linkedOpp.risk,                color: "text-primary" },
                               ].map(m => (
                                 <div key={m.label} className="text-center">
                                   <p className="text-[8px] text-muted-foreground uppercase">{m.label}</p>
@@ -390,7 +377,7 @@ export default function PmxInsights() {
                         )}
                         {isApproved && (
                           <button onClick={() => navigate("/pmx/prd")}
-                            className="w-full flex items-center justify-center gap-2 rounded-xl border border-green-500/20 bg-green-500/5 hover:bg-green-500/10 px-4 py-2.5 text-xs font-semibold text-green-400 transition-all">
+                            className="w-full flex items-center justify-center gap-2 rounded-xl border border-primary/20 bg-primary/5 hover:bg-primary/10 px-4 py-2.5 text-xs font-semibold text-primary transition-all">
                             <FileText className="h-3.5 w-3.5" />Open PRD Blueprint <ArrowRight className="h-3.5 w-3.5" />
                           </button>
                         )}
