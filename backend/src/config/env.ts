@@ -15,9 +15,10 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().min(1),
 
   // ── DeepSeek (AI) ───────────────────────────────────────────────────────────
+  // No model-override env var here on purpose — the model is pinned to
+  // AI_MODEL in services/ai/models.ts so it can't drift per-environment.
   DEEPSEEK_API_KEY:            z.string().min(1),
   DEEPSEEK_BASE_URL:           z.string().optional(),
-  DEEPSEEK_MODEL:              z.string().optional(),
 
   // ── USER BEHAVIOR: server-side fallback keys ────────────────────────────────
   POSTHOG_API_KEY: z.string().optional(),
@@ -72,6 +73,19 @@ const envSchema = z.object({
   // ── Admin Promotion ─────────────────────────────────────────────────────────
   ADMIN_USERNAME:                    z.string().optional(),
   ADMIN_PASSWORD:                    z.string().optional(),
+
+  // ── SMTP (contact / demo-request form) ──────────────────────────────────────
+  // Optional so the app still boots without them — sendDemoRequestEmails
+  // throws a clear error at send time if they're missing, instead of this
+  // failing at startup.
+  SMTP_HOST:       z.string().optional(),
+  SMTP_PORT:       z.string().optional(),
+  SMTP_SECURE:     z.string().optional(),
+  SMTP_USER:       z.string().optional(),
+  SMTP_PASSWORD:   z.string().optional(),
+  SMTP_FROM_NAME:  z.string().default("Starox"),
+  SMTP_FROM_EMAIL: z.string().default("noreply@starox.space"),
+  CONTACT_TO_EMAIL: z.string().default("hello@starox.space"),
 });
 
 export const env = envSchema.parse(process.env);

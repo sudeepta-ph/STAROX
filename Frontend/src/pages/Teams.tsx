@@ -23,7 +23,7 @@ const capabilityCards = [
   {
     icon: Film,
     title: "Edits & Content",
-    description: "AI-assisted video, content, and media edits — fast iteration for marketing and creators.",
+    description: "AI-generated video, AI-assisted edits, and content production — fast iteration for marketing and creators.",
     href: "/teams/edits",
     accentLight: "#1a73e8",
     accentDark: "#60a5fa",
@@ -33,7 +33,7 @@ const capabilityCards = [
   {
     icon: Users,
     title: "Team Delivery",
-    description: "End-to-end project execution: full projects, MVPs, RSVPs, and managed delivery.",
+    description: "The tech team for any idea — TeamX builds the full ecosystem around it, from prototype to production.",
     href: "/teams/teamx",
     accentLight: "#d93025",
     accentDark: "#f87171",

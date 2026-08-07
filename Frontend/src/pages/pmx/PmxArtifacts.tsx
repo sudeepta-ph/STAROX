@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -10,15 +11,19 @@ import {
   FileCode,
   Sparkles,
   ClipboardCheck,
-  Award
+  Award,
+  Database,
+  ArrowRight
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { generatePdfBlob } from "@/lib/pdf/PmxDocumentPdf";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
 export default function PmxArtifacts() {
-  const { artifacts, fetchArtifacts, solutions, tasks, understanding } = usePmxStore();
+  const { artifacts, fetchArtifacts, inputs, loading, projectId } = usePmxStore();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [isAdding, setIsAdding] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
@@ -30,60 +35,23 @@ export default function PmxArtifacts() {
   const [format, setFormat] = useState("markdown");
   const [compiling, setCompiling] = useState(false);
 
+  // Compilation is server-side and AI-driven: the backend pulls the PRD,
+  // evidence, problems, opportunities, decisions, connected sources, UI
+  // analysis, and sprint tasks for this workspace and synthesizes one
+  // cohesive document — rather than the client stitching together whatever
+  // fields happened to already be loaded in the store.
   const handleCreateArtifact = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
     setCompiling(true);
+    toast({ title: "Compiling artifact…", description: "Pulling in the PRD, analysis, and sources — this can take up to a minute." });
     try {
-      // Build content dynamically depending on type selection
-      let content = "";
-      if (type === "prd") {
-        content = `# Product Requirement Document: ${title}\n\n`;
-        content += `## 1. Executive Summary\n${understanding?.productSummary?.oneLiner || "Product outline plan."}\n\n`;
-        content += `## 2. Target Audience\n${understanding?.targetAudience || "Ideal customer profile details."}\n\n`;
-        content += `## 3. Core Features\n`;
-        understanding?.coreFeatures.forEach((f: any) => {
-          content += `- **${f.name}**: ${f.description} (Priority: ${f.priority})\n`;
-        });
-        content += `\n## 4. Approved Blueprints\n`;
-        solutions.forEach((s) => {
-          content += `### ${s.title}\n${s.prd}\n\n`;
-        });
-      } else if (type === "technical_spec") {
-        content = `# Technical Architecture Specification: ${title}\n\n`;
-        content += `## 1. System Design Summary\nBased on approved STAROX PMX solution Studio models.\n\n`;
-        solutions.forEach((s) => {
-          content += `### ${s.title} Specs\n${s.techSpecs}\n\n`;
-          if (s.apiContracts) content += `#### API Structure\n${s.apiContracts}\n\n`;
-          if (s.databaseChanges) content += `#### Database adjustments\n${s.databaseChanges}\n\n`;
-        });
-      } else if (type === "sprint_plan") {
-        content = `# Sprint Execution Plan: ${title}\n\n`;
-        content += `| Task | Category | Estimate | Assignee | Status |\n`;
-        content += `| :--- | :--- | :--- | :--- | :--- |\n`;
-        tasks.forEach((t) => {
-          content += `| ${t.title} | ${t.type} | ${t.timeEstimate} | ${t.assignee || "Dev"} | ${t.status} |\n`;
-        });
-      } else {
-        content = `# Product Strategy Roadmap: ${title}\n\n`;
-        content += `## Value Proposition\n${understanding?.valueProposition || "Key offering description."}\n\n`;
-        content += `## Personas Mapping\n`;
-        understanding?.personas.forEach((p: any) => {
-          content += `- **${p.name}** (${p.role}): Pain point: ${p.painPoints.join(", ")}; Goals: ${p.goals.join(", ")}\n`;
-        });
-      }
-
       const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/artifacts`, {
+      const res = await fetch(`${API_URL}/pmx/artifacts/compile`, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          title,
-          type,
-          content,
-          format
-        })
+        body: JSON.stringify({ projectId, title, type, format }),
       });
 
       const json = await res.json();
@@ -96,15 +64,36 @@ export default function PmxArtifacts() {
         setIsAdding(false);
         fetchArtifacts();
         setSelectedDoc(json.data);
+      } else {
+        toast({ variant: "destructive", title: "Couldn't compile artifact", description: json.error });
       }
     } catch (err) {
       console.error(err);
+      toast({ variant: "destructive", title: "Couldn't compile artifact — check your connection" });
     } finally {
       setCompiling(false);
     }
   };
 
-  const handleDownload = (doc: any) => {
+  const handleDownload = async (doc: any) => {
+    if (doc.format === "markdown") {
+      try {
+        const blob = await generatePdfBlob(doc.title, doc.content);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${doc.title.replace(/\s+/g, "_").toLowerCase()}.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast({ title: "File downloaded", description: `Saved "${doc.title}" locally.` });
+      } catch {
+        toast({ variant: "destructive", title: "PDF export failed" });
+      }
+      return;
+    }
+
     const blob = new Blob([doc.content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -142,16 +131,40 @@ export default function PmxArtifacts() {
     }
   };
 
+  // Compiled artifacts pull from the analysis pipeline (understanding,
+  // solutions, tasks) — an idea-only workspace has none of that, so route
+  // people to connect a source first instead of a compile form with nothing
+  // to compile from.
+  if (!loading.inputs && inputs.length === 0) {
+    return (
+      <div className="flex h-[calc(100vh-3.5rem)] flex-col items-center justify-center gap-3 text-center px-6 bg-background">
+        <div className="p-3 rounded-2xl bg-muted/40 border border-border/40">
+          <Database className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <h2 className="text-sm font-bold text-foreground">No sources yet</h2>
+        <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+          Connect a source and run analysis so there's product intelligence to compile into an artifact.
+        </p>
+        <button
+          onClick={() => navigate("/pmx/sources")}
+          className="mt-1 flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-4 py-2 text-xs font-medium text-primary-foreground transition-all"
+        >
+          Connect a source <ArrowRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-[calc(100vh-3.5rem)] bg-background">
-      
+
       {/* Listing left pane */}
-      <div className="w-72 border-r border-zinc-900 bg-zinc-950/20 overflow-y-auto p-4 space-y-3 shrink-0 scrollbar-thin">
+      <div className="w-72 border-r border-border/50 bg-card/10 overflow-y-auto p-4 space-y-3 shrink-0 scrollbar-thin">
         <div className="flex justify-between items-center pl-2">
-          <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Compiled Artifacts</h3>
+          <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Compiled Artifacts</h3>
           <button
             onClick={() => setIsAdding(true)}
-            className="p-1 rounded bg-sky-500 hover:bg-sky-400 text-black transition-colors"
+            className="p-1 rounded bg-primary hover:bg-primary/90 text-primary-foreground transition-colors"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -169,21 +182,21 @@ export default function PmxArtifacts() {
                 }}
                 className={`w-full text-left p-2.5 rounded-lg border text-xs flex justify-between items-center transition-colors ${
                   active
-                    ? "bg-[#18181b] border-sky-500/20 text-white font-medium"
-                    : "bg-transparent border-transparent text-zinc-400 hover:bg-[#18181b]/30"
+                    ? "bg-primary/10 border-primary/20 text-foreground font-medium"
+                    : "bg-transparent border-transparent text-muted-foreground hover:bg-muted/40"
                 }`}
               >
                 <div className="flex items-center gap-2 truncate">
-                  <FileText className={`h-4 w-4 shrink-0 ${active ? "text-sky-400" : "text-zinc-500"}`} />
+                  <FileText className={`h-4 w-4 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`} />
                   <span className="truncate">{doc.title}</span>
                 </div>
-                <span className="text-[9px] text-zinc-500 uppercase font-mono">{doc.format}</span>
+                <span className="text-[9px] text-muted-foreground uppercase font-mono">{doc.format}</span>
               </button>
             );
           })}
 
           {artifacts.length === 0 && (
-            <div className="text-center py-12 text-zinc-600 text-xs">
+            <div className="text-center py-12 text-muted-foreground text-xs">
               No artifacts compiled yet. Click compile button.
             </div>
           )}
@@ -195,23 +208,23 @@ export default function PmxArtifacts() {
         {selectedDoc && !isAdding ? (
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Toolbar */}
-            <div className="h-14 border-b border-zinc-900 px-6 flex items-center justify-between bg-zinc-950/40 shrink-0">
+            <div className="h-14 border-b border-border/50 px-6 flex items-center justify-between bg-card/20 shrink-0">
               <div>
-                <h2 className="text-xs font-bold text-white">{selectedDoc.title}</h2>
-                <p className="text-[10px] text-zinc-500 mt-0.5">Type: <span className="text-zinc-400 capitalize">{selectedDoc.type.replace(/_/g, ' ')}</span></p>
+                <h2 className="text-xs font-bold text-foreground">{selectedDoc.title}</h2>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Type: <span className="text-foreground/70 capitalize">{selectedDoc.type.replace(/_/g, ' ')}</span></p>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleCopy(selectedDoc.content)}
-                  className="flex items-center justify-center gap-1.5 rounded-lg border border-zinc-800 hover:bg-zinc-900 px-3.5 py-1.5 text-xs font-semibold text-zinc-300 transition-colors"
+                  className="flex items-center justify-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3.5 py-1.5 text-xs font-semibold text-muted-foreground transition-colors"
                 >
-                  {copied ? <ClipboardCheck className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? <ClipboardCheck className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
                   <span>{copied ? "Copied" : "Copy Source"}</span>
                 </button>
                 <button
                   onClick={() => handleDownload(selectedDoc)}
-                  className="flex items-center justify-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 px-4 py-1.5 text-xs font-semibold text-black transition-all"
+                  className="flex items-center justify-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-4 py-1.5 text-xs font-semibold text-primary-foreground transition-all"
                 >
                   <Download className="h-3.5 w-3.5" />
                   <span>Download File</span>
@@ -221,21 +234,21 @@ export default function PmxArtifacts() {
 
             {/* Document display */}
             <div className="flex-1 overflow-y-auto p-6 bg-background">
-              <div className="max-w-4xl rounded-xl border border-zinc-900 bg-zinc-950/50 p-6 font-mono text-zinc-300 text-xs whitespace-pre-wrap leading-relaxed">
+              <div className="max-w-4xl rounded-xl border border-border/40 bg-card/30 p-6 font-mono text-foreground/80 text-xs whitespace-pre-wrap leading-relaxed">
                 {selectedDoc.content}
               </div>
             </div>
           </div>
         ) : isAdding ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 bg-zinc-950/10">
-            <div className="w-full max-w-md rounded-xl border border-zinc-900 bg-zinc-950 p-6 space-y-6">
-              <div className="flex justify-between items-center border-b border-zinc-900 pb-3">
-                <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-                  <Sparkles className="h-4 w-4 text-sky-400" /> Compile Strategic Document
+          <div className="flex-1 flex flex-col items-center justify-center p-6">
+            <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 space-y-6 shadow-2xl">
+              <div className="flex justify-between items-center border-b border-border/50 pb-3">
+                <h3 className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <Sparkles className="h-4 w-4 text-primary" /> Compile Strategic Document
                 </h3>
                 <button
                   onClick={() => setIsAdding(false)}
-                  className="p-1 rounded-md text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+                  className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -243,24 +256,24 @@ export default function PmxArtifacts() {
 
               <form onSubmit={handleCreateArtifact} className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Document Title</label>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Document Title</label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. STAROX PMX MVP roadmap v1"
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    className="w-full bg-[#18181b] border border-zinc-800 focus:border-zinc-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none"
+                    className="w-full bg-background border border-border focus:border-ring rounded-lg px-3 py-2 text-xs text-foreground focus:outline-none placeholder:text-muted-foreground"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Doc Template</label>
+                    <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Doc Template</label>
                     <select
                       value={type}
                       onChange={(e) => setType(e.target.value)}
-                      className="w-full bg-[#18181b] border border-zinc-800 text-zinc-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
+                      className="w-full bg-background border border-border text-foreground rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
                     >
                       <option value="prd">PRD Document</option>
                       <option value="technical_spec">Technical Architecture Spec</option>
@@ -269,11 +282,11 @@ export default function PmxArtifacts() {
                     </select>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider font-semibold">Download Format</label>
+                    <label className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Download Format</label>
                     <select
                       value={format}
                       onChange={(e) => setFormat(e.target.value)}
-                      className="w-full bg-[#18181b] border border-zinc-800 text-zinc-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
+                      className="w-full bg-background border border-border text-foreground rounded-lg px-2.5 py-1.5 text-xs focus:outline-none"
                     >
                       <option value="markdown">Markdown (.md)</option>
                       <option value="json">JSON format</option>
@@ -284,11 +297,11 @@ export default function PmxArtifacts() {
                 <button
                   type="submit"
                   disabled={compiling}
-                  className="w-full bg-sky-500 text-black font-semibold rounded-lg px-4 py-2 text-xs hover:bg-sky-400 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="w-full bg-primary text-primary-foreground font-semibold rounded-lg px-4 py-2 text-xs hover:bg-primary/90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
                 >
                   {compiling ? (
                     <>
-                      <div className="h-3 w-3 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                      <div className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
                       <span>Compiling...</span>
                     </>
                   ) : (
@@ -302,8 +315,8 @@ export default function PmxArtifacts() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 text-xs">
-            <FileText className="h-8 w-8 text-zinc-800 mb-3" />
+          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground text-xs">
+            <FileText className="h-8 w-8 text-border mb-3" />
             Select an artifact from sidebar or compile a new one.
           </div>
         )}

@@ -6,7 +6,7 @@ import {
   X, Link2, Github, FileText, MessageSquare, Upload, Search,
   RefreshCw, Trash2, ExternalLink, ChevronRight, Sparkles,
   Activity, BarChart3, Plug, FolderOpen, GitBranch, LayoutGrid, ArrowUp,
-  Lock, LogOut, ArrowRight, AlertCircle
+  Lock, LogOut, ArrowRight, AlertCircle, Plus, Database
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -80,7 +80,7 @@ interface GithubRepo {
 }
 
 export default function PmxSources() {
-  const { inputs, fetchInputs, runPipeline, loading, selectedSourceIds, setSelectedSourceIds } = usePmxStore();
+  const { inputs, fetchInputs, runPipeline, loading, selectedSourceIds, setSelectedSourceIds, projectId, promoteToTab } = usePmxStore();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -89,17 +89,47 @@ export default function PmxSources() {
   const [pipelinePhase, setPipelinePhase] = useState<"idle"|"queued"|"processing"|"analyzing"|"completed"|"failed">("idle");
   const [lastCheckedIndex, setLastCheckedIndex] = useState<number | null>(null);
 
-  // Add Connector panel (GitHub OAuth + link to full catalog)
+  // Start Session — kicks off the PMX pipeline over the selected sources.
+  const [showStartConfirm, setShowStartConfirm] = useState(false);
+  const [startPulse, setStartPulse] = useState(false);
+
+  const handleStartSessionClick = () => {
+    if (selectedSourceIds.length === 0) {
+      toast({ variant: "destructive", title: "No sources selected", description: "Select one or more sources to begin analysis." });
+      return;
+    }
+    setStartPulse(true);
+    window.setTimeout(() => setStartPulse(false), 420);
+    setShowStartConfirm(true);
+  };
+
+  const handleConfirmStartSession = async () => {
+    setShowStartConfirm(false);
+    try {
+      window.dispatchEvent(new CustomEvent("pmx-pipeline-started"));
+      await runPipeline();
+      window.dispatchEvent(new CustomEvent("pmx-pipeline-completed"));
+      toast({ title: "Analysis Complete", description: "Automated PMX pipeline run finished successfully." });
+    } catch {
+      window.dispatchEvent(new CustomEvent("pmx-pipeline-failed"));
+      toast({ variant: "destructive", title: "Analysis Failed", description: "An error occurred during pipeline run." });
+    }
+  };
+
+  // Add Connector panel (shows connected connectors, links to full catalog)
   const [connectorPanelOpen, setConnectorPanelOpen] = useState(false);
   const [githubStatus, setGithubStatus] = useState<{ connected: boolean; login?: string; avatarUrl?: string } | null>(null);
-  const [githubConnecting, setGithubConnecting] = useState(false);
+  const [connStatus, setConnStatus] = useState<Record<string, { connected: boolean; label?: string }> | null>(null);
+  const [connStatusLoading, setConnStatusLoading] = useState(false);
   const [githubRepos, setGithubRepos] = useState<GithubRepo[]>([]);
   const [githubReposLoading, setGithubReposLoading] = useState(false);
   const [githubSearch, setGithubSearch] = useState("");
   const [connectingRepoId, setConnectingRepoId] = useState<number | null>(null);
   const [githubError, setGithubError] = useState<string | null>(null);
 
-  // Hero quick-add bar (URL type / drag & drop)
+  // Hero quick-add bar (URL type / drag & drop) — collapses to a compact
+  // "Add another source" button once at least one source exists.
+  const [heroBarOpen, setHeroBarOpen] = useState(false);
   const [heroUrl, setHeroUrl] = useState("");
   const [heroSubmitting, setHeroSubmitting] = useState(false);
   const [typewriterText, setTypewriterText] = useState("");
@@ -154,11 +184,14 @@ export default function PmxSources() {
   const createSource = async (payload: { name: string; type: string; url?: string; content?: string }) => {
     try {
       const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/inputs`, { method: "POST", headers, body: JSON.stringify(payload) });
+      const res = await fetch(`${API_URL}/pmx/inputs`, { method: "POST", headers, body: JSON.stringify({ ...payload, projectId }) });
       const json = await res.json();
       if (json.success) {
         toast({ title: "Source added", description: `"${payload.name}" is now syncing.` });
         fetchInputs();
+        // Connecting a source materializes this workspace server-side (see
+        // ensureWorkspace) — make sure it shows up as a tab with its name.
+        promoteToTab(projectId);
         return true;
       }
       toast({ variant: "destructive", title: "Error", description: json.error || "Failed to add source." });
@@ -169,14 +202,25 @@ export default function PmxSources() {
     }
   };
 
-  // ── GitHub OAuth (Add Connector panel) ──────────────────────────────
-  const fetchGithubStatus = async () => {
+  // ── Connectors overview (which OAuth connectors are already linked) ──
+  const fetchConnectorsOverview = async () => {
+    setConnStatusLoading(true);
     try {
       const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/github/status`, { headers });
-      const json = await res.json();
-      if (json.success) setGithubStatus({ connected: json.connected, login: json.login, avatarUrl: json.avatarUrl });
-    } catch { /* silent — surfaced via connect button retry */ }
+      const [ghRes, notionRes, slackRes] = await Promise.all([
+        fetch(`${API_URL}/pmx/github/status`, { headers }),
+        fetch(`${API_URL}/pmx/notion/status`, { headers }),
+        fetch(`${API_URL}/pmx/slack/status`, { headers }),
+      ]);
+      const [ghJson, notionJson, slackJson] = await Promise.all([ghRes.json(), notionRes.json(), slackRes.json()]);
+      setGithubStatus(ghJson.success ? { connected: !!ghJson.connected, login: ghJson.login, avatarUrl: ghJson.avatarUrl } : { connected: false });
+      setConnStatus({
+        github: { connected: !!ghJson.success && !!ghJson.connected, label: ghJson.login },
+        notion: { connected: !!notionJson.success && !!notionJson.connected, label: notionJson.workspaceName },
+        slack: { connected: !!slackJson.success && !!slackJson.connected, label: slackJson.teamName },
+      });
+    } catch { /* leave previous state in place */ }
+    finally { setConnStatusLoading(false); }
   };
 
   const fetchGithubRepos = async (search = "") => {
@@ -193,8 +237,8 @@ export default function PmxSources() {
   };
 
   useEffect(() => {
-    if (connectorPanelOpen && githubStatus === null) fetchGithubStatus();
-  }, [connectorPanelOpen, githubStatus]);
+    if (connectorPanelOpen && connStatus === null) fetchConnectorsOverview();
+  }, [connectorPanelOpen, connStatus]);
 
   useEffect(() => {
     if (connectorPanelOpen && githubStatus?.connected) {
@@ -203,40 +247,13 @@ export default function PmxSources() {
     }
   }, [connectorPanelOpen, githubStatus?.connected, githubSearch]);
 
-  useEffect(() => {
-    const onMessage = (e: MessageEvent) => {
-      if (e.data?.source !== "starox-github-oauth") return;
-      setGithubConnecting(false);
-      if (e.data.success) {
-        toast({ title: "GitHub connected" });
-        fetchGithubStatus();
-      } else {
-        setGithubError(e.data.error || "GitHub connection failed");
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, []);
-
-  const connectGithub = async () => {
-    setGithubConnecting(true);
-    setGithubError(null);
-    try {
-      const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/github/auth-url`, { headers });
-      const json = await res.json();
-      if (!json.success) { setGithubError(json.error || "GitHub OAuth is not configured"); setGithubConnecting(false); return; }
-      const popup = window.open(json.url, "github-oauth", "width=600,height=720");
-      if (!popup) { setGithubError("Popup blocked — allow popups and try again"); setGithubConnecting(false); }
-    } catch { setGithubError("Failed to start GitHub sign-in"); setGithubConnecting(false); }
-  };
-
   const disconnectGithub = async () => {
     try {
       const headers = await getPmxHeaders();
       await fetch(`${API_URL}/pmx/github/disconnect`, { method: "DELETE", headers });
       setGithubStatus({ connected: false });
       setGithubRepos([]);
+      setConnStatus(prev => prev ? { ...prev, github: { connected: false } } : prev);
     } catch { /* no-op */ }
   };
 
@@ -257,7 +274,7 @@ export default function PmxSources() {
     setHeroSubmitting(true);
     const ok = await createSource({ name: hostname, type: "url", url: fullUrl });
     setHeroSubmitting(false);
-    if (ok) setHeroUrl("");
+    if (ok) { setHeroUrl(""); setHeroBarOpen(false); }
   };
 
   const handleFilePick = (file: File, forcedType?: "csv" | "text") => {
@@ -267,8 +284,9 @@ export default function PmxSources() {
     reader.onload = async (ev) => {
       const content = (ev.target?.result as string) || "";
       const name = file.name.replace(/\.[^.]+$/, "");
-      await createSource({ name, type, content });
+      const ok = await createSource({ name, type, content });
       setHeroSubmitting(false);
+      if (ok) setHeroBarOpen(false);
     };
     reader.onerror = () => setHeroSubmitting(false);
     reader.readAsText(file);
@@ -300,13 +318,18 @@ export default function PmxSources() {
     setReportSubmitting(true);
     const ok = await createSource({ name: reportName, type: "report", content: reportContent });
     setReportSubmitting(false);
-    if (ok) { setReportFormOpen(false); setReportName(""); setReportContent(""); }
+    if (ok) { setReportFormOpen(false); setReportName(""); setReportContent(""); setHeroBarOpen(false); }
   };
 
   const filteredInputs = inputs.filter(i => {
     const q = searchQuery.toLowerCase();
     return i.name.toLowerCase().includes(q) || (i.summary && i.summary.toLowerCase().includes(q));
   });
+
+  // First source added to the workspace — every other source is "connected" to it.
+  const primarySourceId = inputs.length
+    ? inputs.reduce((oldest, i) => (new Date(i.createdAt) < new Date(oldest.createdAt) ? i : oldest))._id
+    : null;
 
   const handleCheckboxClick = (index: number, id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -360,6 +383,30 @@ export default function PmxSources() {
             className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${connectorPanelOpen ? "border-primary/40 bg-primary/10 text-primary" : "border-border hover:bg-muted text-foreground"}`}>
             <Plug className="h-3.5 w-3.5" /> Add Connector
           </button>
+
+          {inputs.length > 0 && (
+            <button
+              onClick={handleStartSessionClick}
+              disabled={loading.pipeline}
+              className="group relative ml-auto shrink-0 cursor-pointer border-none bg-transparent p-0 font-mono text-xs font-light uppercase outline-none disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <span className="absolute left-0 top-0 h-full w-full translate-y-0.5 rounded-lg bg-black/25 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:translate-y-1 group-hover:duration-[250ms] group-active:translate-y-px dark:bg-black/40" />
+              <span className="absolute left-0 top-0 h-full w-full rounded-lg bg-gradient-to-l from-[#e0f7fa] via-[#b3e5fc] to-[#81d4fa] dark:from-[#04283f] dark:via-[#063652] dark:to-[#0a4a6e]" />
+              <div className={`relative flex items-center gap-2 -translate-y-1 rounded-lg bg-gradient-to-r from-[#b3e5fc] via-[#4fc3f7] to-[#0288d1] px-3.5 py-1.5 text-xs font-bold text-[#0a3d62] brightness-105 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:-translate-y-1.5 group-hover:brightness-110 group-hover:duration-[250ms] group-active:-translate-y-0.5 dark:from-[#0369a1] dark:via-[#0ea5e9] dark:to-[#38bdf8] dark:text-white ${startPulse ? "start-session-pulse" : ""}`}>
+                {loading.pipeline ? (
+                  <>
+                    <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#0a3d62] border-t-transparent dark:border-white" />
+                    <span className="select-none">Running...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="select-none">Start Session</span>
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
+                  </>
+                )}
+              </div>
+            </button>
+          )}
         </div>
 
         {/* Selection bar */}
@@ -383,7 +430,7 @@ export default function PmxSources() {
           {connectorPanelOpen && (
             <div className="rounded-2xl border border-border bg-card/60 p-5 mb-3">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-foreground flex items-center gap-2"><Github className="h-4 w-4 text-primary" /> Connect GitHub</h3>
+                <h3 className="text-sm font-bold text-foreground flex items-center gap-2"><Plug className="h-4 w-4 text-primary" /> Connectors</h3>
                 <button onClick={() => setConnectorPanelOpen(false)} className="p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"><X className="h-4 w-4" /></button>
               </div>
 
@@ -393,58 +440,88 @@ export default function PmxSources() {
                 </div>
               )}
 
-              {!githubStatus?.connected ? (
-                <button type="button" onClick={connectGithub} disabled={githubConnecting}
-                  className="w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border border-border bg-background hover:bg-muted px-3 py-2.5 text-xs font-semibold text-foreground transition-all disabled:opacity-60">
-                  {githubConnecting
-                    ? <div className="h-3.5 w-3.5 border-2 border-foreground/40 border-t-transparent rounded-full animate-spin" />
-                    : <Github className="h-3.5 w-3.5" />}
-                  {githubConnecting ? "Waiting for GitHub sign-in…" : "Sign in with GitHub"}
-                </button>
-              ) : (
-                <div className="max-w-sm space-y-2.5">
-                  <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background px-2.5 py-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {githubStatus.avatarUrl
-                        ? <img src={githubStatus.avatarUrl} alt="" className="h-5 w-5 rounded-full shrink-0" />
-                        : <Github className="h-4 w-4 shrink-0" />}
-                      <span className="text-[11px] font-medium text-foreground truncate">{githubStatus.login}</span>
-                    </div>
-                    <button type="button" onClick={disconnectGithub}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors shrink-0">
-                      <LogOut className="h-3 w-3" /> Disconnect
-                    </button>
-                  </div>
-
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                    <input type="text" value={githubSearch} onChange={e => setGithubSearch(e.target.value)} placeholder="Search your repositories..."
-                      className="w-full bg-background border border-border focus:border-ring rounded-lg pl-8 pr-3 py-2 text-xs text-foreground focus:outline-none" />
-                  </div>
-
-                  <div className="max-h-56 overflow-y-auto space-y-1.5 rounded-lg border border-border/40 p-1.5 bg-background/40">
-                    {githubReposLoading && (
-                      <div className="flex items-center justify-center py-6 text-muted-foreground">
-                        <div className="h-4 w-4 border-2 border-border border-t-primary rounded-full animate-spin" />
-                      </div>
-                    )}
-                    {!githubReposLoading && githubRepos.length === 0 && (
-                      <p className="text-[10px] text-muted-foreground text-center py-6">No repositories found.</p>
-                    )}
-                    {!githubReposLoading && githubRepos.map(repo => (
-                      <button key={repo.id} type="button" onClick={() => selectRepo(repo)} disabled={connectingRepoId === repo.id}
-                        className="w-full text-left rounded-lg border border-transparent px-2.5 py-2 hover:bg-muted transition-all disabled:opacity-60">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-[11px] font-semibold text-foreground truncate">{repo.fullName}</span>
-                          {repo.private && <Lock className="h-2.5 w-2.5 text-muted-foreground shrink-0" />}
-                          {connectingRepoId === repo.id && <div className="h-2.5 w-2.5 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0" />}
-                        </div>
-                        {repo.description && <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{repo.description}</p>}
-                      </button>
-                    ))}
-                  </div>
+              {connStatusLoading && !connStatus ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="h-5 w-5 border-2 border-border border-t-primary rounded-full animate-spin" />
                 </div>
-              )}
+              ) : (() => {
+                const connected = Object.entries(connStatus || {}).filter(([, v]) => v.connected);
+                if (connected.length === 0) {
+                  return (
+                    <div className="max-w-sm rounded-lg border border-dashed border-border/60 bg-background/40 px-4 py-6 text-center">
+                      <Plug className="h-5 w-5 text-muted-foreground/60 mx-auto mb-2" />
+                      <p className="text-xs text-foreground font-medium">No connectors connected yet</p>
+                      <p className="text-[10px] text-muted-foreground mt-1 mb-3">Connect a tool to pull it in as a source.</p>
+                      <button onClick={() => navigate("/connectors")} className="inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1.5 text-xs font-semibold transition-colors">
+                        Connect a tool
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="max-w-sm space-y-2.5">
+                    {connected.map(([id, info]) => {
+                      if (id !== "github") {
+                        const Icon = id === "notion" ? FileText : MessageSquare;
+                        return (
+                          <div key={id} className="flex items-center justify-between rounded-lg border border-border/50 bg-background px-2.5 py-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <span className="text-[11px] font-medium text-foreground truncate capitalize">{id}</span>
+                              {info.label && <span className="text-[10px] text-muted-foreground truncate">{info.label}</span>}
+                            </div>
+                            <span className="text-[9px] font-semibold text-emerald-400 shrink-0">Connected</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key="github" className="space-y-2.5">
+                          <div className="flex items-center justify-between rounded-lg border border-border/50 bg-background px-2.5 py-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {githubStatus?.avatarUrl
+                                ? <img src={githubStatus.avatarUrl} alt="" className="h-5 w-5 rounded-full shrink-0" />
+                                : <Github className="h-4 w-4 shrink-0" />}
+                              <span className="text-[11px] font-medium text-foreground truncate">{githubStatus?.login}</span>
+                            </div>
+                            <button type="button" onClick={disconnectGithub}
+                              className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-destructive transition-colors shrink-0">
+                              <LogOut className="h-3 w-3" /> Disconnect
+                            </button>
+                          </div>
+
+                          <div className="relative">
+                            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                            <input type="text" value={githubSearch} onChange={e => setGithubSearch(e.target.value)} placeholder="Search your repositories..."
+                              className="w-full bg-background border border-border focus:border-ring rounded-lg pl-8 pr-3 py-2 text-xs text-foreground focus:outline-none" />
+                          </div>
+
+                          <div className="max-h-56 overflow-y-auto space-y-1.5 rounded-lg border border-border/40 p-1.5 bg-background/40">
+                            {githubReposLoading && (
+                              <div className="flex items-center justify-center py-6 text-muted-foreground">
+                                <div className="h-4 w-4 border-2 border-border border-t-primary rounded-full animate-spin" />
+                              </div>
+                            )}
+                            {!githubReposLoading && githubRepos.length === 0 && (
+                              <p className="text-[10px] text-muted-foreground text-center py-6">No repositories found.</p>
+                            )}
+                            {!githubReposLoading && githubRepos.map(repo => (
+                              <button key={repo.id} type="button" onClick={() => selectRepo(repo)} disabled={connectingRepoId === repo.id}
+                                className="w-full text-left rounded-lg border border-transparent px-2.5 py-2 hover:bg-muted transition-all disabled:opacity-60">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-[11px] font-semibold text-foreground truncate">{repo.fullName}</span>
+                                  {repo.private && <Lock className="h-2.5 w-2.5 text-muted-foreground shrink-0" />}
+                                  {connectingRepoId === repo.id && <div className="h-2.5 w-2.5 border-2 border-primary border-t-transparent rounded-full animate-spin shrink-0" />}
+                                </div>
+                                {repo.description && <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{repo.description}</p>}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between">
                 <span className="text-[11px] text-muted-foreground">Need something else?</span>
@@ -455,63 +532,75 @@ export default function PmxSources() {
             </div>
           )}
 
-          {/* Hero quick-add bar — persistent, doubles as a dropzone */}
-          <div
-            onDragOver={handleHeroDragOver}
-            onDragEnter={handleHeroDragOver}
-            onDragLeave={handleHeroDragLeave}
-            onDrop={handleHeroDrop}
-            className={`rounded-2xl border p-5 mb-3 transition-colors ${dragActive ? "border-primary bg-primary/5" : "border-border bg-card/40"}`}
-          >
-            {inputs.length === 0 && (
-              <div className="space-y-1 mb-4 text-center">
-                <h2 className="text-xl font-bold text-foreground">What powers your product intelligence?</h2>
-                <p className="text-xs text-muted-foreground">Paste a URL, drop a file, or upload data to start analysis.</p>
-              </div>
-            )}
-
-            <form onSubmit={handleQuickAddUrl}>
-              <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background px-4 py-3 focus-within:border-primary/50 transition-colors">
-                <Link2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                <input
-                  ref={heroUrlInputRef}
-                  type="text"
-                  value={heroUrl}
-                  onChange={e => setHeroUrl(e.target.value)}
-                  placeholder={dragActive ? "Drop a file or link to add it..." : typewriterText}
-                  className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
-                />
-                <button type="submit" disabled={!heroUrl.trim() || heroSubmitting}
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-all disabled:opacity-40 shrink-0">
-                  {heroSubmitting
-                    ? <div className="h-3.5 w-3.5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                    : <ArrowUp className="h-4 w-4" />}
+          {/* Hero quick-add bar — shown up front for the first source, then
+              collapses to a compact "Add another source" button. */}
+          {inputs.length > 0 && !heroBarOpen ? (
+            <button type="button" onClick={() => setHeroBarOpen(true)}
+              className="w-full flex items-center justify-center gap-1.5 rounded-2xl border border-dashed border-border/70 bg-card/20 hover:border-primary/40 hover:bg-primary/5 py-3 mb-3 text-xs font-semibold text-muted-foreground hover:text-primary transition-all">
+              <Plus className="h-3.5 w-3.5" /> Add another source
+            </button>
+          ) : (
+            <div
+              onDragOver={handleHeroDragOver}
+              onDragEnter={handleHeroDragOver}
+              onDragLeave={handleHeroDragLeave}
+              onDrop={handleHeroDrop}
+              className={`relative rounded-2xl border p-5 mb-3 transition-colors ${dragActive ? "border-primary bg-primary/5" : "border-border bg-card/40"}`}
+            >
+              {inputs.length === 0 ? (
+                <div className="space-y-1 mb-4 text-center">
+                  <h2 className="text-xl font-bold text-foreground">What powers your product intelligence?</h2>
+                  <p className="text-xs text-muted-foreground">Paste a URL, drop a file, or upload data to start analysis.</p>
+                </div>
+              ) : (
+                <button onClick={() => setHeroBarOpen(false)} className="absolute right-4 top-4 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <X className="h-4 w-4" />
                 </button>
-              </div>
-            </form>
+              )}
 
-            <p className="text-center text-[10px] text-muted-foreground/60 mt-2">or drag & drop a CSV, PDF, or doc anywhere in this box</p>
-
-            <div className="flex items-center justify-center gap-4 mt-4">
-              {HERO_QUICK_TYPES.map(qt => {
-                const Ico = qt.icon;
-                return (
-                  <button key={qt.id} type="button" onClick={() => handleQuickIconClick(qt.id)}
-                    className="flex flex-col items-center gap-1.5 group">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border/60 bg-card group-hover:border-primary/40 group-hover:bg-primary/5 transition-all">
-                      <Ico className="h-4.5 w-4.5 text-muted-foreground group-hover:text-primary transition-colors" />
-                    </div>
-                    <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors">{qt.label}</span>
+              <form onSubmit={handleQuickAddUrl}>
+                <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-background px-4 py-3 focus-within:border-primary/50 transition-colors">
+                  <Link2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <input
+                    ref={heroUrlInputRef}
+                    type="text"
+                    value={heroUrl}
+                    onChange={e => setHeroUrl(e.target.value)}
+                    placeholder={dragActive ? "Drop a file or link to add it..." : typewriterText}
+                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none min-w-0"
+                  />
+                  <button type="submit" disabled={!heroUrl.trim() || heroSubmitting}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-primary hover:bg-primary/90 text-primary-foreground transition-all disabled:opacity-40 shrink-0">
+                    {heroSubmitting
+                      ? <div className="h-3.5 w-3.5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                      : <ArrowUp className="h-4 w-4" />}
                   </button>
-                );
-              })}
-            </div>
+                </div>
+              </form>
 
-            <input ref={csvInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleFilePick(f, "csv"); e.target.value = ""; }} />
-            <input ref={docInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.md" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleFilePick(f, "text"); e.target.value = ""; }} />
-          </div>
+              <p className="text-center text-[10px] text-muted-foreground/60 mt-2">or drag & drop a CSV, PDF, or doc anywhere in this box</p>
+
+              <div className="flex items-center justify-center gap-4 mt-4">
+                {HERO_QUICK_TYPES.map(qt => {
+                  const Ico = qt.icon;
+                  return (
+                    <button key={qt.id} type="button" onClick={() => handleQuickIconClick(qt.id)}
+                      className="flex flex-col items-center gap-1.5 group">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-border/60 bg-card group-hover:border-primary/40 group-hover:bg-primary/5 transition-all">
+                        <Ico className="h-4.5 w-4.5 text-muted-foreground group-hover:text-primary transition-colors" />
+                      </div>
+                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors">{qt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <input ref={csvInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleFilePick(f, "csv"); e.target.value = ""; }} />
+              <input ref={docInputRef} type="file" accept=".pdf,.doc,.docx,.txt,.md" className="hidden"
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleFilePick(f, "text"); e.target.value = ""; }} />
+            </div>
+          )}
 
           {/* Report quick-add form */}
           {reportFormOpen && (
@@ -558,6 +647,9 @@ export default function PmxSources() {
                     <div className="flex items-center gap-2">
                       <h4 className="text-xs font-semibold text-foreground truncate">{input.name}</h4>
                       <span className={`text-[9px] uppercase font-mono ${meta.color} ${meta.bg} border ${meta.border} px-1.5 py-0.5 rounded shrink-0`}>{meta.label}</span>
+                      {input._id === primarySourceId && (
+                        <span className="text-[9px] uppercase font-mono text-primary bg-primary/10 border border-primary/20 px-1.5 py-0.5 rounded shrink-0">Primary</span>
+                      )}
                     </div>
                     <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{input.summary || "Extracting signals..."}</p>
                   </div>
@@ -618,6 +710,21 @@ export default function PmxSources() {
                 <p>ID: <span className="font-mono">{selectedInput._id}</span></p>
                 <p>Added: {new Date(selectedInput.createdAt).toLocaleString()}</p>
               </div>
+              <div className="border-t border-border/40 pt-3 space-y-2">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
+                  {inputs.length > 1 ? `Connected to ${inputs.length - 1} other source${inputs.length - 1 === 1 ? "" : "s"}` : "Connect more sources"}
+                </span>
+                <div className="flex gap-2">
+                  <button onClick={() => { setHeroBarOpen(true); setConnectorPanelOpen(false); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 py-2 text-xs font-semibold text-foreground/80 transition-colors">
+                    <Plus className="h-3.5 w-3.5" /> New source
+                  </button>
+                  <button onClick={() => { setConnectorPanelOpen(true); setHeroBarOpen(false); }}
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 py-2 text-xs font-semibold text-foreground/80 transition-colors">
+                    <Plug className="h-3.5 w-3.5" /> New connector
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="border-t border-border/40 pt-4 mt-4 flex gap-2">
               <button onClick={() => handleReprocess(selectedInput._id, selectedInput.name)} className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-border hover:bg-muted px-3 py-2 text-xs font-semibold text-foreground/80 transition-colors">
@@ -628,6 +735,72 @@ export default function PmxSources() {
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Start Session confirmation modal */}
+      <AnimatePresence>
+        {showStartConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md bg-zinc-950 border border-zinc-900 rounded-2xl p-6 shadow-2xl relative"
+            >
+              <button
+                onClick={() => setShowStartConfirm(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-sky-400">
+                  <img src="/assets/images/strx.png" className="h-5 w-5 object-contain" alt="" />
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Running PMX Intelligence</h3>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs text-zinc-400 pb-2 border-b border-zinc-900">
+                    <span>Sources Selected:</span>
+                    <span className="font-bold text-white bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+                      {selectedSourceIds.length}
+                    </span>
+                  </div>
+
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 py-2 pr-1 scrollbar-thin">
+                    {inputs.filter(i => selectedSourceIds.includes(i._id)).map(source => (
+                      <div key={source._id} className="flex items-center gap-2 rounded-lg bg-zinc-900/40 border border-zinc-900 px-3 py-2">
+                        <Database className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+                        <span className="text-xs text-zinc-300 truncate font-medium">{source.name}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-xl bg-sky-500/5 border border-sky-500/10 p-3.5 mt-2">
+                    <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">Estimated Processing Time</span>
+                    <p className="text-xs text-zinc-300 font-semibold mt-0.5">~45 seconds</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowStartConfirm(false)}
+                    className="flex-1 rounded-lg border border-zinc-800 hover:bg-zinc-900 py-2.5 text-xs font-semibold text-zinc-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmStartSession}
+                    className="flex-1 rounded-lg bg-sky-500 hover:bg-sky-400 py-2.5 text-xs font-bold text-black transition-colors"
+                  >
+                    Start Analysis
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

@@ -52,14 +52,6 @@ export const SEARCH_ITEMS: SearchItem[] = [
     iconName: "Folder"
   },
   {
-    title: "Solutions",
-    description: "Tailored intelligence solutions for founders, PMs, and designers.",
-    category: "Pages",
-    keywords: ["solutions", "personas", "founders", "managers", "marketing"],
-    route: "/solutions",
-    iconName: "Compass"
-  },
-  {
     title: "Pricing",
     description: "Simple, transparent pricing plans for teams of all sizes.",
     category: "Pages",

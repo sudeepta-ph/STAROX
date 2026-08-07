@@ -290,7 +290,7 @@ export default function Blog() {
             <button
               onMouseEnter={() => handleTabChange("solutions")}
               onFocus={() => handleTabChange("solutions")}
-              onClick={() => navigate("/solutions")}
+              onClick={(e) => { e.preventDefault(); handleTabChange(activeTab === "solutions" ? null : "solutions"); }}
               aria-haspopup="true"
               aria-expanded={activeTab === "solutions"}
               className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${

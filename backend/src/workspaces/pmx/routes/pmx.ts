@@ -14,7 +14,8 @@ import {
   PmxAuditLogModel,
   PmxScreenshotProjectModel,
   PmxSessionModel,
-  PmxIdeaPrdModel
+  PmxIdeaPrdModel,
+  PmxTokenUsageModel
 } from "../../../models/Pmx";
 import {
   generateProductUnderstanding,
@@ -23,12 +24,17 @@ import {
   scoreOpportunities,
   generateDecisionRecommendations,
   generateSolutionDetails,
-  generateExecutionTasks
+  combineSolutions,
+  compileArtifact,
+  generateExecutionTasks,
+  refineSolutionPrd
 } from "../../../services/pmxAi";
-import { generateIdeaPrd, refineIdeaPrd, TokenBudgetExceededError } from "../../../services/pmxIdeaPrd";
+import { generateIdeaPrd, refineIdeaPrd } from "../../../services/pmxIdeaPrd";
 import { analyzeScreenshotUI } from "../../../services/screenshotAi";
 import { runUIAudit } from "../../../services/uiAuditAi";
-import { screenshotRouter } from "./screenshot";
+import { AI_MODEL } from "../../../services/ai/models";
+import { UsageCapExceededError, HARD_DAILY_CAP_USD } from "../../../services/ai/deepseek";
+import { screenshotRouter, captureScreenshot } from "./screenshot";
 import crypto from "node:crypto";
 
 export const pmxRouter = Router();
@@ -55,6 +61,38 @@ async function logAudit(req: AuthenticatedRequest, projectId: string, action: st
   }
 }
 
+// Materializes a workspace the moment it gets real content — the frontend no
+// longer eagerly creates a blank "Untitled N" workspace up front; instead a
+// fresh projectId is only promoted to an actual workspace (and shows up in
+// GET /projects) here, the first time an idea is generated or a source is
+// added under it. $setOnInsert means this is a no-op for a projectId that
+// already has a workspace — an existing name is never overwritten.
+async function ensureWorkspace(projectId: string, userId: string, name: string) {
+  try {
+    await PmxUnderstandingModel.findOneAndUpdate(
+      { projectId, userId, isDeleted: false },
+      {
+        $setOnInsert: {
+          projectId,
+          userId,
+          productSummary: { name: name?.trim() || "Untitled", oneLiner: "", category: "SaaS", stage: "idea" },
+          businessModel: "",
+          coreFeatures: [],
+          targetAudience: "",
+          personas: [],
+          customerSegments: [],
+          businessGoals: [],
+          valueProposition: "",
+          customerJourney: [],
+        },
+      },
+      { upsert: true }
+    );
+  } catch (err) {
+    console.error("[PMX] Failed to materialize workspace:", err);
+  }
+}
+
 // Helper to run full downstream intelligence pipeline
 export async function runDownstreamPipeline(
   projectId: string,
@@ -71,14 +109,16 @@ export async function runDownstreamPipeline(
   }
 
   const inputs = await PmxInputModel.find(query);
-  if (inputs.length === 0) return;
+  if (inputs.length === 0) {
+    throw new Error("None of the selected sources could be found for this workspace — try reselecting them.");
+  }
 
   const actualSelectedIds = inputs.map(i => i._id.toString());
   const textContents = inputs.map(i => `[Source: ${i.name} (${i.type})]\n${i.content || ""}\n${i.summary || ""}`);
 
   // 1. Regenerate Understanding
   console.log("[PMX Pipeline] Step 1: Synthesizing Product Understanding...");
-  const understandingData = await generateProductUnderstanding(textContents);
+  const understandingData = await generateProductUnderstanding(textContents, undefined, userId, projectId);
   
   let understanding = await PmxUnderstandingModel.findOne({ projectId, userId, isDeleted: false });
   if (!understanding) {
@@ -106,7 +146,7 @@ export async function runDownstreamPipeline(
 
   // 2. Extract Evidence Signals
   console.log("[PMX Pipeline] Step 2: Extracting Evidence Signals...");
-  const evidenceSignals = await generateEvidenceSignals(textContents);
+  const evidenceSignals = await generateEvidenceSignals(textContents, undefined, userId, projectId);
   // Remove old auto-extracted evidence for clean sweep, but keep manual ones (manual source is e.g. "User Uploaded")
   await PmxEvidenceModel.deleteMany({ projectId, userId, source: { $ne: "User Uploaded" } });
   
@@ -126,7 +166,7 @@ export async function runDownstreamPipeline(
 
   // 3. Detect Problems
   console.log("[PMX Pipeline] Step 3: Detecting Problems...");
-  const detectedProblems = await detectProductProblems(allEvidence, textContents);
+  const detectedProblems = await detectProductProblems(allEvidence, textContents, undefined, userId, projectId);
   await PmxProblemModel.deleteMany({ projectId, userId });
   const problemDocs = detectedProblems.map((prob: any) => ({
     projectId,
@@ -141,7 +181,7 @@ export async function runDownstreamPipeline(
 
   // 4. Score Opportunities
   console.log("[PMX Pipeline] Step 4: Scoring Opportunities...");
-  const scopedOpportunities = await scoreOpportunities(detectedProblems, understandingData);
+  const scopedOpportunities = await scoreOpportunities(detectedProblems, understandingData, undefined, userId, projectId);
   await PmxOpportunityModel.deleteMany({ projectId, userId });
   const opportunityDocs = scopedOpportunities.map((opp: any) => {
     const userImpact = opp.userImpact ?? 5;
@@ -172,7 +212,7 @@ export async function runDownstreamPipeline(
 
   // 5. Generate Decisions
   console.log("[PMX Pipeline] Step 5: Formulating Decisions...");
-  const recommendations = await generateDecisionRecommendations(detectedProblems, scopedOpportunities);
+  const recommendations = await generateDecisionRecommendations(detectedProblems, scopedOpportunities, undefined, userId, projectId);
   await PmxDecisionModel.deleteMany({ projectId, userId });
   const decisionDocs = recommendations.map((dec: any) => ({
     projectId,
@@ -199,7 +239,7 @@ export async function runDownstreamPipeline(
       solutionCount: 0,
       taskCount: 0
     },
-    aiModel: "deepseek-v4-flash",
+    aiModel: AI_MODEL,
     durationMs
   });
 
@@ -321,6 +361,120 @@ pmxRouter.get("/analytics/overview", async (req: AuthenticatedRequest, res, next
 // 0. PROJECT / PRODUCT LIFECYCLE
 // ==========================================
 
+// List every PMX workspace the user has. `PmxUnderstandingModel` doubles as
+// the workspace registry — a row here is what makes a projectId a "real"
+// workspace. Rows are created explicitly (POST /projects) or implicitly the
+// moment a projectId gets real content (see ensureWorkspace, called from
+// idea generation and source creation) — never as a side effect of a GET.
+pmxRouter.get("/projects", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const userId = req.userId!;
+    const workspaces = await PmxUnderstandingModel.find({ userId, isDeleted: false });
+    const projectIds = workspaces.map((w) => w.projectId);
+
+    const inputAgg = await PmxInputModel.aggregate([
+      { $match: { userId, projectId: { $in: projectIds }, isDeleted: false } },
+      { $sort: { createdAt: 1 } },
+      {
+        $group: {
+          _id: "$projectId",
+          count: { $sum: 1 },
+          first: { $first: "$$ROOT" },
+          lastCreatedAt: { $last: "$createdAt" },
+        },
+      },
+    ]);
+    const inputsByProject = new Map(inputAgg.map((r) => [r._id as string, r]));
+
+    const data = workspaces
+      .map((w) => {
+        const agg = inputsByProject.get(w.projectId);
+        const sourceCount = agg?.count ?? 0;
+        const primarySource = agg?.first
+          ? { _id: agg.first._id, name: agg.first.name, url: agg.first.url, type: agg.first.type }
+          : null;
+        const updatedAt = agg?.lastCreatedAt && agg.lastCreatedAt > w.updatedAt ? agg.lastCreatedAt : w.updatedAt;
+        return {
+          projectId: w.projectId,
+          name: w.productSummary?.name || "Untitled Project",
+          sourceCount,
+          isProject: sourceCount >= 2,
+          primarySource,
+          updatedAt,
+        };
+      })
+      .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
+
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Create a new PMX workspace. Just materializes a fresh `projectId` and its
+// placeholder understanding doc — every other endpoint already works with
+// any projectId string, so nothing else needs to know about it up front.
+pmxRouter.post("/projects", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const userId = req.userId!;
+    let name = (req.body?.name as string | undefined)?.trim();
+    if (!name) {
+      // Number untitled workspaces like browser tabs: Untitled 1, Untitled 2…
+      const untitled = await PmxUnderstandingModel.find(
+        { userId, isDeleted: false, "productSummary.name": { $regex: /^Untitled \d+$/ } },
+        { "productSummary.name": 1 }
+      );
+      const nextNumber = untitled.reduce((max, w) => {
+        const n = parseInt(w.productSummary?.name?.replace("Untitled ", "") || "0", 10);
+        return Number.isFinite(n) && n > max ? n : max;
+      }, 0) + 1;
+      name = `Untitled ${nextNumber}`;
+    }
+    const projectId = crypto.randomUUID();
+
+    await PmxUnderstandingModel.create({
+      projectId,
+      userId,
+      productSummary: { name, oneLiner: "", category: "SaaS", stage: "idea" },
+      businessModel: "",
+      coreFeatures: [],
+      targetAudience: "",
+      personas: [],
+      customerSegments: [],
+      businessGoals: [],
+      valueProposition: "",
+      customerJourney: [],
+    });
+
+    res.json({ success: true, data: { projectId, name } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Rename a workspace — a targeted update of just productSummary.name so it
+// can be called from the Products list without loading (and risking
+// clobbering) the rest of that workspace's understanding doc.
+pmxRouter.put("/projects/:projectId/rename", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const name = (req.body?.name as string | undefined)?.trim();
+    if (!name) return res.status(400).json({ success: false, error: "A name is required" });
+
+    const understanding = await PmxUnderstandingModel.findOneAndUpdate(
+      { projectId, userId: req.userId, isDeleted: false },
+      { $set: { "productSummary.name": name } },
+      { new: true }
+    );
+    if (!understanding) return res.status(404).json({ success: false, error: "Workspace not found" });
+
+    await logAudit(req, projectId, "project_renamed", `Renamed workspace to "${name}"`, "PmxUnderstanding", understanding._id.toString());
+    res.json({ success: true, data: { projectId, name } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Permanently delete a product and cascade the delete across every
 // stage of data scoped to it — sources, understanding, evidence,
 // analysis, problems, opportunities, decisions, solutions, tasks,
@@ -419,7 +573,7 @@ pmxRouter.post("/inputs", async (req: AuthenticatedRequest, res, next) => {
     try {
       const summaryResponse = await generateProductUnderstanding([
         `Source Content to summarize:\n${content || url || ""}`
-      ]);
+      ], undefined, req.userId, projectId);
       aiSummary = summaryResponse?.productSummary?.oneLiner || "Source processed by AI.";
     } catch {
       aiSummary = "Source uploaded. Pending deep intelligence summary.";
@@ -437,6 +591,10 @@ pmxRouter.post("/inputs", async (req: AuthenticatedRequest, res, next) => {
       summary: aiSummary,
       history: [{ status: "completed", note: "Source successfully uploaded and parsed." }]
     });
+
+    // Connecting a source materializes the workspace, same as generating an
+    // idea PRD does — a no-op if this projectId already has one.
+    await ensureWorkspace(projectId, req.userId!, name);
 
     await logAudit(req, projectId, "input_created", `Imported new source: "${name}" (${type})`, "PmxInput", inputNode._id.toString());
 
@@ -492,7 +650,7 @@ pmxRouter.post("/inputs/:id/reprocess", async (req: AuthenticatedRequest, res, n
     try {
       const summaryResponse = await generateProductUnderstanding([
         `Source Content:\n${input.content || input.url || ""}`
-      ]);
+      ], undefined, req.userId, input.projectId);
       aiSummary = summaryResponse?.productSummary?.oneLiner || "Parsed source details.";
     } catch (err) {
       console.error(err);
@@ -559,35 +717,17 @@ pmxRouter.delete("/inputs/:id", async (req: AuthenticatedRequest, res, next) => 
 // 2. PRODUCT UNDERSTANDING ENDPOINTS (Stage 2)
 // ==========================================
 
-// Get current product understanding
+// Get current product understanding. Deliberately does NOT auto-create a
+// placeholder anymore — this used to fire on every page load/tab switch
+// (via fetchAll), which meant just looking at a brand-new projectId
+// silently materialized it as a real "My Product Workspace" workspace.
+// Workspaces now only become real via ensureWorkspace (idea generated or
+// a source connected) — this route just reports what's there, or null.
 pmxRouter.get("/understanding", async (req: AuthenticatedRequest, res, next) => {
   try {
     const projectId = (req.query.projectId as string) || "default";
-    let understanding = await PmxUnderstandingModel.findOne({ projectId, userId: req.userId, isDeleted: false });
-
-    // Generate basic placeholder if none exists yet
-    if (!understanding) {
-      understanding = await PmxUnderstandingModel.create({
-        projectId,
-        userId: req.userId,
-        productSummary: {
-          name: "My Product Workspace",
-          oneLiner: "Brief details of what we are building.",
-          category: "SaaS",
-          stage: "idea"
-        },
-        businessModel: "Freemium subscriptions",
-        coreFeatures: [{ name: "Dashboard", description: "Analytical graphs", priority: "high" }],
-        targetAudience: "Startups and small teams",
-        personas: [{ name: "Founder Frank", role: "CEO", painPoints: ["No code skills"], goals: ["Launch MVP fast"] }],
-        customerSegments: ["SMB", "Enterprise"],
-        businessGoals: [{ goal: "Get 100 beta signups", successMetric: "Conversion rate" }],
-        valueProposition: "Fast product analytics",
-        customerJourney: [{ stage: "Signup", actions: ["Fill email form"], painPoints: ["Confusing email check"] }]
-      });
-    }
-
-    res.json({ success: true, data: understanding });
+    const understanding = await PmxUnderstandingModel.findOne({ projectId, userId: req.userId, isDeleted: false });
+    res.json({ success: true, data: understanding || null });
   } catch (err) {
     next(err);
   }
@@ -733,43 +873,6 @@ pmxRouter.get("/analysis", async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-// Create analysis audit reports
-pmxRouter.post("/analysis/generate", async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { projectId = "default", url, title = "Website UX Audit" } = req.body;
-    if (!url) return res.status(400).json({ success: false, error: "Website URL is required" });
-
-    // Simulate crawl or trigger DeepSeek request based on page text (mock analysis for speed, or fallback)
-    const analysisReport = await PmxAnalysisModel.create({
-      projectId,
-      userId: req.userId,
-      title,
-      score: 72,
-      report: {
-        websiteUrl: url,
-        navigation: "Heavy navigation header. Nested drop-downs cause mobile display issues.",
-        accessibility: "Score of 68/100 due to insufficient contrast in footer links and missing alt labels on hero icons.",
-        performance: "FCP is 2.4 seconds. Large bundle sizes block main thread.",
-        flows: [
-          { flowName: "Onboarding Flow", stepCount: 5, dropOffRate: 42, isDuplicate: false },
-          { flowName: "Payment Checkout", stepCount: 3, dropOffRate: 28, isDuplicate: false },
-          { flowName: "Social Login Chaining", stepCount: 4, dropOffRate: 15, isDuplicate: true }
-        ],
-        issues: [
-          { issue: "Excessive fields in onboarding forms", severity: "high", recommendation: "Collapse fields into 2-step modular wizard layout." },
-          { issue: "Broken redirect on password confirmation link", severity: "critical", recommendation: "Adjust route path configuration inside redirect controller." },
-          { issue: "Poor contrast ratio in dark theme banners", severity: "medium", recommendation: "Change gray text to slate-200 colors." }
-        ]
-      }
-    });
-
-    await logAudit(req, projectId, "analysis_generated", `Completed usability flow audit for: ${url}`, "PmxAnalysis", analysisReport._id.toString());
-    res.json({ success: true, data: analysisReport });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // ──────────────────────────────────────────────────────────────
 // UI INTELLIGENCE AGENT — focused UI/UX-only audit
 // POST /api/pmx/analysis/ui-audit
@@ -821,9 +924,116 @@ pmxRouter.post("/analysis/ui-audit", async (req: AuthenticatedRequest, res, next
 
     const context      = contextParts.join("\n");
     const auditMode    = (hasScreenshots ? "enhance" : "initial") as "initial" | "enhance";
-    const result       = await runUIAudit(context, auditMode);
+
+    // Pure URL-mode only (not the "enhance" URL+screenshots case, which
+    // already has real screenshots from the user) — capture a real full-page
+    // screenshot server-side before auditing, so URL-mode results carry the
+    // same { dataUrl, label } screenshot data screenshot-mode has always had
+    // client-side, and get a real screenshotIndex instead of null. The AI
+    // itself never sees the image (DeepSeek here is text-only) — this is
+    // purely for the response's `screenshots` field.
+    let capturedScreenshot: { dataUrl: string; label: string } | null = null;
+    if (hasUrl && !hasScreenshots) {
+      try {
+        const captured = await captureScreenshot(url, { fullPage: true });
+        capturedScreenshot = { dataUrl: captured.dataUrl, label: title || url };
+      } catch (err: any) {
+        // Degrade gracefully — a capture failure (site blocks headless
+        // browsers, times out, etc.) shouldn't block the text-only audit
+        // that worked fine before this feature existed.
+        console.warn(`[UI Audit] Screenshot capture failed for ${url}: ${err?.message ?? err}`);
+      }
+    }
+    const screenshotCountForAI = hasScreenshots ? screenshots.length : (capturedScreenshot ? 1 : 0);
+
+    const result = await runUIAudit(context, auditMode, screenshotCountForAI, req.userId);
+    if (capturedScreenshot) {
+      result.screenshots = [capturedScreenshot];
+    }
 
     res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Turn an already-computed AI Experience Intelligence result into actionable
+// Insights cards — split out from /analysis/ui-audit so approving a result
+// the user already ran doesn't re-invoke the AI a second time.
+pmxRouter.post("/analysis/ui-audit/save-to-insights", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { projectId = "default", url, result } = req.body;
+    const issues = result?.issues;
+    if (!Array.isArray(issues) || issues.length === 0) {
+      return res.status(400).json({ success: false, error: "No audit result to add." });
+    }
+
+    const sourceLabel = url ? `AI Experience Intelligence audit of ${url}` : "AI Experience Intelligence screenshot audit";
+
+    // Per-issue try/catch so one bad issue doesn't abort the whole batch —
+    // and doesn't leave the client thinking nothing was saved when earlier
+    // issues in the loop actually were. `created`/`failed` let the caller
+    // retry only what actually failed instead of resubmitting everything.
+    const created: Array<{ issueId: string; problemId: string; decisionId: string }> = [];
+    const failed: Array<{ issueId: string; error: string }> = [];
+
+    for (const issue of issues) {
+      const issueId = issue?.id ?? "unknown";
+      // Tracked outside the try so the catch can see whether the Problem
+      // half of the pair made it in before the Decision half failed.
+      let problem: any = null;
+      try {
+        // Per-issue, not the shared sourceLabel alone — a multi-screenshot
+        // audit's approved problems should still say which screen they came
+        // from instead of all pointing back to the same generic source.
+        const evidenceParts = [sourceLabel];
+        if (issue.screen) evidenceParts.push(issue.screen);
+        if (typeof issue.screenshotIndex === "number") evidenceParts.push(`Screenshot ${issue.screenshotIndex + 1}`);
+        const issueEvidence = evidenceParts.join(" — ");
+
+        problem = await PmxProblemModel.create({
+          projectId,
+          userId: req.userId,
+          title: issue.title,
+          description: issue.problem,
+          type: "ux",
+          evidence: [issueEvidence],
+          severity: issue.severity,
+          businessImpact: issue.change,
+          userImpact: issue.problem,
+          suggestedFix: issue.improvement,
+        });
+        const decision = await PmxDecisionModel.create({
+          projectId,
+          userId: req.userId,
+          title: `Fix: ${issue.title}`,
+          category: "improve",
+          reasoning: issue.improvement,
+          evidence: issueEvidence,
+          tradeoffs: "N/A — direct UX fix identified by AI Experience Intelligence.",
+          expectedOutcome: issue.change,
+          confidence: 65,
+          estimatedROI: "TBD",
+        });
+        created.push({ issueId, problemId: problem._id.toString(), decisionId: decision._id.toString() });
+      } catch (err: any) {
+        // Don't leave a half-created Problem with no matching Decision
+        // behind — a retry of this issueId should start from "nothing
+        // exists for it yet", not create a second, duplicate Decision.
+        if (problem) await PmxProblemModel.findByIdAndDelete(problem._id).catch(() => {});
+        failed.push({ issueId, error: err?.message || "Failed to save this issue." });
+      }
+    }
+
+    if (created.length > 0) {
+      await logAudit(
+        req, projectId, "ai_experience_intelligence_run",
+        `Added ${created.length} insight${created.length === 1 ? "" : "s"} from AI Experience Intelligence${url ? ` for ${url}` : ""}${failed.length ? ` (${failed.length} failed)` : ""}`,
+        "PmxProblem"
+      );
+    }
+
+    res.json({ success: true, addedToInsights: created.length, created, failed });
   } catch (err) {
     next(err);
   }
@@ -996,7 +1206,7 @@ pmxRouter.put("/decisions/:id/status", async (req: AuthenticatedRequest, res, ne
     // Auto-generate solution details (Stage 8 Solution Studio) synchronously if approved
     if (status === "approved") {
       try {
-        const solData = await generateSolutionDetails(decision.title, decision.category, decision.reasoning);
+        const solData = await generateSolutionDetails(decision.title, decision.category, decision.reasoning, undefined, req.userId, decision.projectId);
         await PmxSolutionModel.create({
           projectId: decision.projectId,
           userId: req.userId,
@@ -1084,13 +1294,121 @@ pmxRouter.put("/solutions/:id", async (req: AuthenticatedRequest, res, next) => 
   }
 });
 
+// AI prompt bar for the Solution Studio PRD — same "edit in place" contract
+// as /idea/prd/:id/refine, scoped to the solution's `prd` field.
+pmxRouter.post("/solutions/:id/refine", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { instruction } = req.body;
+    if (!instruction || !instruction.trim()) {
+      return res.status(400).json({ success: false, error: "An instruction is required" });
+    }
+
+    const solution = await PmxSolutionModel.findOne({ _id: req.params.id, userId: req.userId, isDeleted: false });
+    if (!solution) return res.status(404).json({ success: false, error: "Solution not found" });
+
+    const result = await refineSolutionPrd(solution.prd, instruction, undefined, req.userId, solution.projectId);
+
+    solution.history.push({
+      updatedAt: new Date(),
+      updatedBy: req.userId!,
+      prd: solution.prd,
+      techSpecs: solution.techSpecs,
+      instruction,
+      changeSummary: result.changeSummary,
+    });
+    solution.prd = result.markdown;
+    solution.version += 1;
+    await solution.save();
+
+    await logAudit(req, solution.projectId, "solution_refined", `Refined PRD (v${solution.version}): "${instruction.slice(0, 80)}"`, "PmxSolution", solution._id.toString());
+
+    res.json({ success: true, data: solution, changeSummary: result.changeSummary });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Restore a previous version of a solution's PRD/tech specs from its history
+pmxRouter.post("/solutions/:id/rewind", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { historyId } = req.body;
+    if (!historyId) return res.status(400).json({ success: false, error: "A historyId is required" });
+
+    const solution = await PmxSolutionModel.findOne({ _id: req.params.id, userId: req.userId, isDeleted: false });
+    if (!solution) return res.status(404).json({ success: false, error: "Solution not found" });
+
+    const snapshot = (solution.history as any).id(historyId);
+    if (!snapshot) return res.status(404).json({ success: false, error: "That version no longer exists" });
+
+    solution.history.push({
+      updatedAt: new Date(),
+      updatedBy: req.userId!,
+      prd: solution.prd,
+      techSpecs: solution.techSpecs
+    });
+    solution.prd = snapshot.prd;
+    solution.techSpecs = snapshot.techSpecs;
+    solution.version += 1;
+    await solution.save();
+
+    await logAudit(req, solution.projectId, "solution_rewound", `Restored PRD to an earlier version (now v${solution.version})`, "PmxSolution", solution._id.toString());
+
+    res.json({ success: true, data: solution });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Merge N existing blueprints into one new, cohesive Solution Studio doc —
+// leaves the source blueprints untouched and adds the merged result as a new
+// tab, rather than overwriting any of the inputs.
+pmxRouter.post("/solutions/combine", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { solutionIds, title } = req.body;
+    if (!Array.isArray(solutionIds) || solutionIds.length < 2) {
+      return res.status(400).json({ success: false, error: "Select at least 2 blueprints to combine" });
+    }
+
+    const sources = await PmxSolutionModel.find({ _id: { $in: solutionIds }, userId: req.userId, isDeleted: false });
+    if (sources.length < 2) {
+      return res.status(404).json({ success: false, error: "Couldn't find the selected blueprints" });
+    }
+    // Preserve the order the caller selected them in, not Mongo's return order.
+    const ordered = solutionIds.map((id: string) => sources.find(s => s._id.toString() === id)).filter(Boolean) as typeof sources;
+
+    const merged = await combineSolutions(ordered.map(s => ({ title: s.title, prd: s.prd, techSpecs: s.techSpecs })), undefined, req.userId, ordered[0].projectId);
+
+    const combined = await PmxSolutionModel.create({
+      projectId: ordered[0].projectId,
+      userId: req.userId,
+      title: title || merged.title || `${ordered.map(s => s.title).join(" + ")}`,
+      prd: merged.prd,
+      epic: merged.epic || "",
+      userStories: merged.userStories || [],
+      techSpecs: merged.techSpecs || "",
+      apiContracts: merged.apiContracts,
+      databaseChanges: merged.databaseChanges,
+      securityNotes: merged.securityNotes,
+      uxImprovements: merged.uxImprovements,
+      edgeCases: merged.edgeCases,
+      combinedFromSolutionIds: solutionIds,
+    });
+
+    await logAudit(req, combined.projectId, "solutions_combined", `Combined ${ordered.length} blueprints into: "${combined.title}"`, "PmxSolution", combined._id.toString());
+
+    res.json({ success: true, data: combined });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Trigger manual solution synthesis
 pmxRouter.post("/solutions/generate", async (req: AuthenticatedRequest, res, next) => {
   try {
     const { projectId = "default", title, category = "build", reasoning = "Manually generated solution blueprint." } = req.body;
     if (!title) return res.status(400).json({ success: false, error: "Title is required" });
 
-    const solData = await generateSolutionDetails(title, category, reasoning);
+    const solData = await generateSolutionDetails(title, category, reasoning, undefined, req.userId, projectId);
     const solution = await PmxSolutionModel.create({
       projectId,
       userId: req.userId,
@@ -1155,10 +1473,16 @@ pmxRouter.put("/tasks/:id", async (req: AuthenticatedRequest, res, next) => {
     if (!task) return res.status(404).json({ success: false, error: "Task ticket not found" });
 
     const oldStatus = task.status;
-    Object.assign(task, { status, title, description, type, sprintPlan, priority, timeEstimate, assignee, dependencies });
+    // Only touch fields the caller actually sent — a status-only PUT (the
+    // Kanban Move/Back buttons) must not blank out title/description/type,
+    // which are required and would otherwise fail validation on save.
+    const updates: Record<string, any> = { status, title, description, type, sprintPlan, priority, timeEstimate, assignee, dependencies };
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) (task as any)[key] = value;
+    }
     await task.save();
 
-    if (status !== oldStatus) {
+    if (status !== undefined && status !== oldStatus) {
       await logAudit(req, task.projectId, "task_status_changed", `Changed ticket state: "${task.title}" -> ${status}`, "PmxExecutionTask", task._id.toString());
     } else {
       await logAudit(req, task.projectId, "task_updated", `Modified sprint ticket attributes: "${task.title}"`, "PmxExecutionTask", task._id.toString());
@@ -1173,16 +1497,42 @@ pmxRouter.put("/tasks/:id", async (req: AuthenticatedRequest, res, next) => {
 // Auto-generate tickets from PRD (Solution)
 pmxRouter.post("/tasks/generate", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const { solutionId } = req.body;
-    const solution = await PmxSolutionModel.findOne({ _id: solutionId, userId: req.userId, isDeleted: false });
-    if (!solution) return res.status(404).json({ success: false, error: "Solution not found" });
+    const { solutionId, ideaPrdId } = req.body;
 
-    const newTasks = await generateExecutionTasks(solution.prd, solution.techSpecs);
-    
+    let projectId: string;
+    let title: string;
+    let prd: string;
+    let techSpecs: string;
+    let logEntityType: string;
+    let logEntityId: string;
+
+    if (ideaPrdId) {
+      const doc = await PmxIdeaPrdModel.findOne({ _id: ideaPrdId, userId: req.userId, isDeleted: false });
+      if (!doc) return res.status(404).json({ success: false, error: "PRD not found" });
+      projectId = doc.projectId;
+      title = doc.productName || "Development PRD";
+      prd = doc.markdown;
+      techSpecs = "";
+      logEntityType = "PmxIdeaPrd";
+      logEntityId = doc._id.toString();
+    } else {
+      const solution = await PmxSolutionModel.findOne({ _id: solutionId, userId: req.userId, isDeleted: false });
+      if (!solution) return res.status(404).json({ success: false, error: "Solution not found" });
+      projectId = solution.projectId;
+      title = solution.title;
+      prd = solution.prd;
+      techSpecs = solution.techSpecs;
+      logEntityType = "PmxSolution";
+      logEntityId = solution._id.toString();
+    }
+
+    const newTasks = await generateExecutionTasks(prd, techSpecs, undefined, req.userId, projectId);
+
     const taskDocs = newTasks.map((t: any) => ({
-      projectId: solution.projectId,
+      projectId,
       userId: req.userId,
-      solutionId: solution._id.toString(),
+      solutionId: solutionId || undefined,
+      ideaPrdId: ideaPrdId || undefined,
       title: t.title,
       description: t.description,
       type: t.type,
@@ -1195,7 +1545,7 @@ pmxRouter.post("/tasks/generate", async (req: AuthenticatedRequest, res, next) =
     }));
 
     const inserted = await PmxExecutionTaskModel.insertMany(taskDocs);
-    await logAudit(req, solution.projectId, "tasks_generated", `Compiled ${inserted.length} sprint tickets from spec: "${solution.title}"`, "PmxSolution", solution._id.toString());
+    await logAudit(req, projectId, "tasks_generated", `Compiled ${inserted.length} sprint tickets from spec: "${title}"`, logEntityType, logEntityId);
 
     res.json({ success: true, data: inserted });
   } catch (err) {
@@ -1235,7 +1585,55 @@ pmxRouter.get("/artifacts", async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
-// Create exportable document
+// Compile an exportable document via AI synthesis across the whole
+// workspace — PRD/blueprints, evidence, problems, opportunities, decisions,
+// connected sources, UI analysis, and sprint tasks — rather than the caller
+// assembling `content` itself from whatever it happens to have loaded.
+pmxRouter.post("/artifacts/compile", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { projectId = "default", title, type = "prd", format = "markdown" } = req.body;
+    if (!title || !title.trim()) return res.status(400).json({ success: false, error: "A title is required" });
+
+    const filter = { projectId, userId: req.userId, isDeleted: false };
+    const [ideaPrd, solutions, evidence, problems, opportunities, decisions, inputs, analysis, tasks] = await Promise.all([
+      PmxIdeaPrdModel.findOne({ projectId, userId: req.userId, isDeleted: false, status: "completed" }).sort({ createdAt: -1 }),
+      PmxSolutionModel.find(filter).sort({ updatedAt: -1 }).limit(5),
+      PmxEvidenceModel.find(filter).sort({ importance: -1, confidence: -1 }).limit(10),
+      PmxProblemModel.find(filter).sort({ confidence: -1 }).limit(10),
+      PmxOpportunityModel.find(filter).sort({ riceScore: -1 }).limit(10),
+      PmxDecisionModel.find(filter).sort({ confidence: -1 }).limit(10),
+      PmxInputModel.find(filter).limit(15),
+      PmxAnalysisModel.find(filter).sort({ createdAt: -1 }).limit(3),
+      PmxExecutionTaskModel.find(filter).limit(30),
+    ]);
+
+    const sections: string[] = [];
+    if (ideaPrd) sections.push(`### Development PRD\n${ideaPrd.markdown}`);
+    if (solutions.length) sections.push(`### Approved Blueprints\n${solutions.map(s => `#### ${s.title}\n${s.prd}`).join("\n\n")}`);
+    if (inputs.length) sections.push(`### Connected Sources\n${inputs.map(i => `- ${i.name} (${i.type})${i.summary ? `: ${i.summary}` : ""}`).join("\n")}`);
+    if (evidence.length) sections.push(`### Evidence Signals\n${evidence.map(e => `- [${e.category}] ${e.title}: ${e.description}`).join("\n")}`);
+    if (problems.length) sections.push(`### Detected Problems\n${problems.map(p => `- [${p.severity}] ${p.title}: ${p.description}`).join("\n")}`);
+    if (opportunities.length) sections.push(`### Opportunities\n${opportunities.map(o => `- ${o.title} (RICE ${o.riceScore}): ${o.description}`).join("\n")}`);
+    if (decisions.length) sections.push(`### Decisions\n${decisions.map(d => `- [${d.category}/${d.status}] ${d.title}: ${d.reasoning}`).join("\n")}`);
+    if (analysis.length) sections.push(`### UI Analysis\n${analysis.map(a => `- ${a.title} (score ${a.score}): ${(a.report?.issues || []).slice(0, 5).map((i: any) => i.issue).join("; ")}`).join("\n")}`);
+    if (tasks.length) sections.push(`### Sprint Tasks\n${tasks.map(t => `- [${t.status}] ${t.title} (${t.type}, ${t.priority}, ${t.timeEstimate})`).join("\n")}`);
+
+    if (sections.length === 0) {
+      return res.status(400).json({ success: false, error: "Nothing to compile yet — connect sources or generate a PRD first." });
+    }
+
+    const context = sections.join("\n\n---\n\n");
+    const content = await compileArtifact(type, title, context, undefined, req.userId, projectId);
+
+    const doc = await PmxArtifactModel.create({ projectId, userId: req.userId, title, type, content, format });
+    await logAudit(req, projectId, "artifact_created", `Compiled artifact from workspace data: "${title}" (${format})`, "PmxArtifact", doc._id.toString());
+    res.json({ success: true, data: doc });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Create exportable document (manual/direct content, no AI compilation)
 pmxRouter.post("/artifacts", async (req: AuthenticatedRequest, res, next) => {
   try {
     const { projectId = "default", title, type, content, format = "markdown" } = req.body;
@@ -1285,6 +1683,89 @@ pmxRouter.get("/history", async (req: AuthenticatedRequest, res, next) => {
   }
 });
 
+// Rolling window start for the requested range, anchored to "now" so a
+// dashboard poll always reflects a moving trailing window rather than a
+// fixed calendar bucket — matches how the other history/session queries in
+// this router are just "everything so far", no calendar-boundary semantics.
+function usageRangeStart(range: string): Date {
+  const start = new Date();
+  if (range === "today") {
+    start.setHours(0, 0, 0, 0);
+  } else if (range === "month") {
+    start.setDate(start.getDate() - 30);
+  } else {
+    start.setDate(start.getDate() - 7);
+  }
+  return start;
+}
+
+// Read-only AI token usage / cost summary for the authenticated user.
+pmxRouter.get("/usage", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const range = ["today", "week", "month"].includes(req.query.range as string) ? (req.query.range as string) : "week";
+    const match = { userId: req.userId, createdAt: { $gte: usageRangeStart(range) } };
+
+    const [totals] = await PmxTokenUsageModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalTokens: { $sum: "$totalTokens" },
+          // Breakdown only — already included in totalTokens, not added to it.
+          reasoningTokens: { $sum: "$reasoningTokens" },
+          totalCostUsd: { $sum: "$costUsd" },
+        },
+      },
+    ]);
+
+    const byStage = await PmxTokenUsageModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$stage",
+          promptTokens: { $sum: "$promptTokens" },
+          completionTokens: { $sum: "$completionTokens" },
+          reasoningTokens: { $sum: "$reasoningTokens" },
+          totalTokens: { $sum: "$totalTokens" },
+          costUsd: { $sum: "$costUsd" },
+        },
+      },
+      { $project: { _id: 0, stage: "$_id", promptTokens: 1, completionTokens: 1, reasoningTokens: 1, totalTokens: 1, costUsd: 1 } },
+      { $sort: { totalTokens: -1 } },
+    ]);
+
+    const byModel = await PmxTokenUsageModel.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: "$aiModel",
+          promptTokens: { $sum: "$promptTokens" },
+          completionTokens: { $sum: "$completionTokens" },
+          reasoningTokens: { $sum: "$reasoningTokens" },
+          totalTokens: { $sum: "$totalTokens" },
+          costUsd: { $sum: "$costUsd" },
+        },
+      },
+      { $project: { _id: 0, aiModel: "$_id", promptTokens: 1, completionTokens: 1, reasoningTokens: 1, totalTokens: 1, costUsd: 1 } },
+      { $sort: { totalTokens: -1 } },
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        range,
+        totalTokens: totals?.totalTokens ?? 0,
+        reasoningTokens: totals?.reasoningTokens ?? 0,
+        totalCostUsd: totals?.totalCostUsd ?? 0,
+        byStage,
+        byModel,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ==========================================
 // 12. SCREENSHOT INTELLIGENCE ENDPOINTS
 // ==========================================
@@ -1321,7 +1802,7 @@ pmxRouter.post("/screenshot-intelligence", async (req: AuthenticatedRequest, res
 
     const analyzedScreenshots = [];
     for (const s of screenshots) {
-      const annotations = await analyzeScreenshotUI(s.title);
+      const annotations = await analyzeScreenshotUI(s.title, req.userId, projectId);
       analyzedScreenshots.push({
         id: crypto.randomUUID(),
         title: s.title || "Screenshot UI",
@@ -1529,10 +2010,17 @@ pmxRouter.post("/idea/generate", async (req: AuthenticatedRequest, res, next) =>
     doc.productName = result.productName;
     doc.stack = result.stack;
     doc.assumptions = result.assumptions;
+    doc.pages = result.pages;
+    doc.layout = result.layout;
     doc.tokensUsed = result.tokensUsed;
     doc.aiModel = result.model;
     doc.version = 1;
     await doc.save();
+
+    // This idea just became a real workspace — materialize it (a no-op if
+    // it already existed) so it shows up in the workspace switcher/tab bar
+    // under the AI's own product name instead of a generic "Untitled N".
+    await ensureWorkspace(projectId, req.userId!, result.productName);
 
     await logAudit(req, projectId, "idea_prd_generated", `Generated execution-ready PRD for idea: "${idea.slice(0, 80)}"`, "PmxIdeaPrd", doc._id.toString());
 
@@ -1540,11 +2028,8 @@ pmxRouter.post("/idea/generate", async (req: AuthenticatedRequest, res, next) =>
   } catch (err: any) {
     if (doc) {
       doc.status = "failed";
-      doc.error = err instanceof TokenBudgetExceededError ? err.message : "PRD generation failed. Please try again.";
+      doc.error = "PRD generation failed. Please try again.";
       await doc.save().catch(() => {});
-    }
-    if (err instanceof TokenBudgetExceededError) {
-      return res.status(422).json({ success: false, error: err.message });
     }
     next(err);
   }
@@ -1590,6 +2075,9 @@ pmxRouter.post("/idea/prd/:id/refine", async (req: AuthenticatedRequest, res, ne
 
     const result = await refineIdeaPrd(doc.markdown, doc.stack, instruction);
 
+    // Snapshot the pre-edit state so it can be restored later.
+    doc.versions.push({ version: doc.version, markdown: doc.markdown, stack: doc.stack, createdAt: new Date() });
+
     doc.markdown = result.markdown;
     doc.stack = result.stack;
     doc.version += 1;
@@ -1602,9 +2090,46 @@ pmxRouter.post("/idea/prd/:id/refine", async (req: AuthenticatedRequest, res, ne
 
     res.json({ success: true, data: doc, changeSummary: result.changeSummary });
   } catch (err: any) {
-    if (err instanceof TokenBudgetExceededError) {
-      return res.status(422).json({ success: false, error: err.message });
-    }
     next(err);
   }
+});
+
+// Restore a previous version of an idea-flow PRD from its version snapshots
+pmxRouter.post("/idea/prd/:id/rewind", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { version } = req.body;
+    if (version === undefined || version === null) {
+      return res.status(400).json({ success: false, error: "A version is required" });
+    }
+
+    const doc = await PmxIdeaPrdModel.findOne({ _id: req.params.id, userId: req.userId, isDeleted: false });
+    if (!doc) return res.status(404).json({ success: false, error: "PRD not found" });
+
+    const snapshot = doc.versions.find((v) => v.version === version);
+    if (!snapshot) return res.status(404).json({ success: false, error: "That version no longer exists" });
+
+    doc.versions.push({ version: doc.version, markdown: doc.markdown, stack: doc.stack, createdAt: new Date() });
+    doc.markdown = snapshot.markdown;
+    doc.stack = snapshot.stack;
+    doc.version += 1;
+    doc.history.push({ role: "assistant", content: `Restored to version ${version}.`, createdAt: new Date() });
+    await doc.save();
+
+    await logAudit(req, doc.projectId, "idea_prd_rewound", `Restored PRD to v${version} (now v${doc.version})`, "PmxIdeaPrd", doc._id.toString());
+
+    res.json({ success: true, data: doc });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Router-level error handler: every route above funnels its catch block
+// into next(err), so this runs before the generic app-level errorHandler
+// and gives UsageCapExceededError its own 402 shape instead of falling
+// through to that handler's generic { error: message } / 500.
+pmxRouter.use((err: any, _req: AuthenticatedRequest, res: any, next: any) => {
+  if (err instanceof UsageCapExceededError) {
+    return res.status(402).json({ success: false, error: "Daily AI usage limit reached", cap: HARD_DAILY_CAP_USD });
+  }
+  next(err);
 });

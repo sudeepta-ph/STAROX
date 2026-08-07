@@ -116,7 +116,7 @@ const ProjectsPage = () => {
     });
   };
 
-  const openProjectForAnalysis = (project: Project) => {
+  const openProjectUrl = (project: Project) => {
     if (!project.url) return;
     if (user) {
       void updateDoc(doc(db, "users", user.uid, "projects", project.id), {
@@ -124,7 +124,7 @@ const ProjectsPage = () => {
         updatedAt: serverTimestamp(),
       }).catch(() => {});
     }
-    navigate(`/pmx?url=${encodeURIComponent(project.url)}`);
+    window.open(project.url, "_blank", "noopener,noreferrer");
   };
 
   const filtered = projects.filter((p) => {
@@ -284,9 +284,9 @@ const ProjectsPage = () => {
                   <div className="flex items-center gap-3 mb-2">
                     <button
                       type="button"
-                      onClick={() => openProjectForAnalysis(project)}
+                      onClick={() => openProjectUrl(project)}
                       className="text-sm font-semibold text-foreground truncate hover:text-primary transition-colors text-left"
-                      title="Open project in Product Intelligence"
+                      title={project.url ? "Open website" : undefined}
                     >
                       {project.name}
                     </button>
@@ -297,9 +297,9 @@ const ProjectsPage = () => {
                   {project.url && (
                     <button
                       type="button"
-                      onClick={() => openProjectForAnalysis(project)}
+                      onClick={() => openProjectUrl(project)}
                       className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors mb-3 w-fit text-left"
-                      title="Regenerate in Product Intelligence"
+                      title="Open website"
                     >
                       <ExternalLink className="w-3 h-3" />
                       <span className="truncate max-w-xs">{project.url}</span>
@@ -321,16 +321,6 @@ const ProjectsPage = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 opacity-100">
-                  {project.url && (
-                    <button
-                      type="button"
-                      onClick={() => openProjectForAnalysis(project)}
-                      className="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-surface-hover transition-colors"
-                      title="Regenerate"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); void toggleStar(project); }}

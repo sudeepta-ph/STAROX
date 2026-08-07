@@ -1492,7 +1492,7 @@ const StaroxIntelligence = () => {
             <button
               onMouseEnter={() => handleTabChange("solutions")}
               onFocus={() => handleTabChange("solutions")}
-              onClick={() => navigate("/solutions")}
+              onClick={(e) => { e.preventDefault(); handleTabChange(activeTab === "solutions" ? null : "solutions"); }}
               aria-haspopup="true"
               aria-expanded={activeTab === "solutions"}
               className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${
@@ -1734,16 +1734,6 @@ const StaroxIntelligence = () => {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: smoothEase }}
           >
-            {/* Badge */}
-            <motion.span
-              className="inline-flex items-center rounded-full border border-primary/20 bg-primary/8 px-3.5 py-1 text-[clamp(10px,1.2vw,12px)] font-semibold uppercase tracking-widest text-primary"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.05, ease: smoothEase }}
-            >
-              STAROX Intelligence
-            </motion.span>
-
             {/* Headline */}
             <motion.h1
               className="font-display text-[clamp(2rem,6vw,5rem)] font-bold leading-[1.15] tracking-tight text-foreground max-w-3xl"

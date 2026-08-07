@@ -1,26 +1,27 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Settings, Save, Sparkles, Bell, Cpu, Shield, Users, Lock,
-  Zap, ChevronRight, Star, Search, Plus, Package, Check,
-  AlertCircle, Clock, RefreshCw, Database, Key, Plug, Trash2,
-  DownloadCloud, Layers, X, ChevronDown,
+  Save, Sparkles, Bell, Cpu, Shield, Users, Lock,
+  Zap, ChevronRight, Package, Check,
+  AlertCircle, RefreshCw, Database, Key, Plug, Trash2,
+  DownloadCloud, Layers, ChevronDown, Plus, X, Activity,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import ProductSwitcher, { type Product } from "@/components/pmx/ProductSwitcher";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
-const LAST_PRODUCT_KEY = "pmx_last_product";
-const FAVORITES_KEY    = "pmx_fav_products";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-interface Product {
-  id: string;
-  name: string;
-  category: string;
-  stage: string;
-  workspace: string;
-  lastSynced?: string;
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 // ── Nav groups ────────────────────────────────────────────────────────────────
@@ -108,15 +109,6 @@ function TextInput({ value, onChange, placeholder, type = "text" }: {
   );
 }
 
-function Textarea({ value, onChange, placeholder, rows = 2 }: {
-  value: string; onChange: (v: string) => void; placeholder?: string; rows?: number;
-}) {
-  return (
-    <textarea rows={rows} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className="w-full bg-background border border-border focus:border-ring rounded-lg px-3 py-2 text-xs text-foreground focus:outline-none resize-none placeholder:text-muted-foreground transition-colors" />
-  );
-}
-
 function Select({ value, onChange, children }: {
   value: string; onChange: (v: string) => void; children: React.ReactNode;
 }) {
@@ -128,141 +120,165 @@ function Select({ value, onChange, children }: {
   );
 }
 
-function ComingSoon({ icon: Icon, message }: { icon: any; message: string }) {
-  return (
-    <div className="py-16 text-center flex flex-col items-center gap-3">
-      <Icon className="h-10 w-10 text-border" />
-      <p className="text-xs text-muted-foreground max-w-xs">{message}</p>
-    </div>
-  );
-}
+const CATEGORY_PRESETS = [
+  "SaaS", "Marketplace", "E-commerce", "Fintech", "Healthtech", "EdTech",
+  "Developer Tools", "AI / ML", "Productivity", "Social", "Gaming", "Other",
+];
 
-// ── Product Switcher ──────────────────────────────────────────────────────────
-function ProductSwitcher({
-  products, selected, onSelect, onCreateNew, onManage,
-}: {
-  products: Product[];
-  selected: Product | null;
-  onSelect: (p: Product) => void;
-  onCreateNew: () => void;
-  onManage: () => void;
+const AUDIENCE_PRESETS = [
+  "Developers", "Marketers", "Founders / Startups", "Enterprises",
+  "Small Businesses", "Consumers", "Students", "Freelancers",
+  "Non-technical Users", "Sales Teams", "Support Teams", "Designers",
+];
+
+// Single-select dropdown that also lets the user type and save a value not in the preset list.
+function CreatableSelect({ value, onChange, options, placeholder }: {
+  value: string; onChange: (v: string) => void; options: string[]; placeholder?: string;
 }) {
-  const [open, setOpen]       = useState(false);
-  const [query, setQuery]     = useState("");
-  const [favs, setFavs]       = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(FAVORITES_KEY) || "[]"); } catch { return []; }
-  });
-  const [cursor, setCursor]   = useState(0);
-  const inputRef              = useRef<HTMLInputElement>(null);
-  const containerRef          = useRef<HTMLDivElement>(null);
-
-  const toggleFav = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const next = favs.includes(id) ? favs.filter(f => f !== id) : [...favs, id];
-    setFavs(next);
-    localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
-  };
-
-  const filtered = products.filter(p =>
-    !query || [p.name, p.workspace, p.category].some(f => f.toLowerCase().includes(query.toLowerCase()))
-  );
-  const recents  = products.slice(0, 3);
-  const favList  = products.filter(p => favs.includes(p.id));
-
-  const allVisible = query ? filtered : products;
-
-  useEffect(() => {
-    if (open) setTimeout(() => inputRef.current?.focus(), 50);
-  }, [open]);
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false); setAdding(false); setCustomInput("");
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setCursor(c => Math.min(c + 1, allVisible.length - 1)); }
-    if (e.key === "ArrowUp")   { e.preventDefault(); setCursor(c => Math.max(c - 1, 0)); }
-    if (e.key === "Enter" && allVisible[cursor]) { onSelect(allVisible[cursor]); setOpen(false); setQuery(""); }
-    if (e.key === "Escape") setOpen(false);
+  const allOptions = value && !options.includes(value) ? [value, ...options] : options;
+
+  const commitCustom = () => {
+    const v = customInput.trim();
+    if (v) { onChange(v); setOpen(false); }
+    setAdding(false); setCustomInput("");
   };
 
   return (
-    <div ref={containerRef} className="relative w-full">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-3 bg-card border border-border hover:border-ring/50 rounded-xl px-4 py-3 text-left transition-all group"
-      >
-        <div className="h-8 w-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-          <Package className="h-4 w-4 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-semibold text-foreground truncate">
-            {selected ? selected.name : "Select a product..."}
-          </p>
-          {selected && <p className="text-[10px] text-muted-foreground truncate">{selected.workspace} · {selected.category}</p>}
-        </div>
-        <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+    <div ref={containerRef} className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between bg-background border border-border hover:border-ring/50 rounded-lg px-3 py-2 text-xs text-left focus:outline-none transition-colors">
+        <span className={value ? "text-foreground" : "text-muted-foreground"}>{value || placeholder}</span>
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
-            transition={{ duration: 0.13 }}
-            className="absolute top-full left-0 right-0 mt-1.5 z-50 rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl overflow-hidden"
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}
+            className="absolute top-full left-0 right-0 mt-1.5 z-30 rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl overflow-hidden"
           >
-            {/* Search */}
-            <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-              <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <input
-                ref={inputRef}
-                value={query}
-                onChange={e => { setQuery(e.target.value); setCursor(0); }}
-                onKeyDown={handleKey}
-                placeholder="Search products..."
-                className="flex-1 bg-transparent text-xs text-foreground focus:outline-none placeholder:text-muted-foreground"
-              />
-              {query && <button onClick={() => setQuery("")}><X className="h-3 w-3 text-muted-foreground hover:text-foreground" /></button>}
-            </div>
-
-            <div className="max-h-72 overflow-y-auto py-1">
-              {!query && favList.length > 0 && (
-                <>
-                  <p className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Starred</p>
-                  {favList.map((p, i) => <ProductRow key={p.id} p={p} isFav={true} isSelected={selected?.id === p.id} isCursor={cursor === i} onSelect={() => { onSelect(p); setOpen(false); setQuery(""); }} onToggleFav={toggleFav} />)}
-                  <div className="mx-3 my-1 border-t border-border/50" />
-                </>
-              )}
-              {!query && (
-                <>
-                  <p className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Recent</p>
-                  {recents.map((p, i) => <ProductRow key={p.id} p={p} isFav={favs.includes(p.id)} isSelected={selected?.id === p.id} isCursor={cursor === i + favList.length} onSelect={() => { onSelect(p); setOpen(false); setQuery(""); }} onToggleFav={toggleFav} />)}
-                  <div className="mx-3 my-1 border-t border-border/50" />
-                  <p className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">All Products</p>
-                </>
-              )}
-              {allVisible.map((p, i) => (
-                <ProductRow key={p.id} p={p} isFav={favs.includes(p.id)} isSelected={selected?.id === p.id}
-                  isCursor={cursor === i} onSelect={() => { onSelect(p); setOpen(false); setQuery(""); }} onToggleFav={toggleFav} />
+            <div className="max-h-52 overflow-y-auto py-1">
+              {allOptions.map(o => (
+                <button key={o} type="button" onClick={() => { onChange(o); setOpen(false); }}
+                  className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors ${o === value ? "bg-primary/10 text-primary font-semibold" : "text-foreground/80 hover:bg-muted/50"}`}>
+                  {o}
+                  {o === value && <Check className="h-3 w-3" />}
+                </button>
               ))}
-              {allVisible.length === 0 && <p className="px-3 py-4 text-xs text-muted-foreground text-center">No products found</p>}
             </div>
+            <div className="border-t border-border p-2">
+              {adding ? (
+                <input
+                  autoFocus
+                  value={customInput}
+                  onChange={e => setCustomInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitCustom(); } if (e.key === "Escape") { setAdding(false); setCustomInput(""); } }}
+                  onBlur={commitCustom}
+                  placeholder="Type a new category..."
+                  className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none"
+                />
+              ) : (
+                <button type="button" onClick={() => setAdding(true)}
+                  className="w-full flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] font-semibold text-primary hover:bg-primary/5 transition-colors">
+                  <Plus className="h-3.5 w-3.5" /> Add custom category
+                </button>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
-            {/* Footer actions */}
-            <div className="border-t border-border flex divide-x divide-border">
-              <button onClick={() => { onCreateNew(); setOpen(false); }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors">
-                <Plus className="h-3.5 w-3.5" /> New Product
-              </button>
-              <button onClick={() => { onManage(); setOpen(false); }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors">
-                <Settings className="h-3.5 w-3.5" /> Manage Products
+// Multi-select tag picker (backed by a single comma-separated string, matching the
+// existing free-text `targetAudience` field on the understanding doc) that also lets
+// the user type a custom audience tag not in the preset list.
+function TagMultiSelect({ value, onChange, options, placeholder }: {
+  value: string; onChange: (v: string) => void; options: string[]; placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [customInput, setCustomInput] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selected = value ? value.split(",").map(s => s.trim()).filter(Boolean) : [];
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggle = (tag: string) => {
+    const next = selected.includes(tag) ? selected.filter(t => t !== tag) : [...selected, tag];
+    onChange(next.join(", "));
+  };
+
+  const addCustom = () => {
+    const tag = customInput.trim();
+    setCustomInput("");
+    if (!tag || selected.includes(tag)) return;
+    onChange([...selected, tag].join(", "));
+  };
+
+  const allOptions = [...new Set([...options, ...selected])];
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="w-full min-h-[38px] flex flex-wrap items-center gap-1.5 bg-background border border-border hover:border-ring/50 rounded-lg px-3 py-2 text-xs text-left transition-colors">
+        {selected.length === 0 && <span className="text-muted-foreground">{placeholder}</span>}
+        {selected.map(tag => (
+          <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 text-primary px-2 py-0.5 text-[10px] font-medium">
+            {tag}
+            <span role="button" onClick={e => { e.stopPropagation(); toggle(tag); }} className="hover:text-destructive cursor-pointer">
+              <X className="h-2.5 w-2.5" />
+            </span>
+          </span>
+        ))}
+        <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground shrink-0 ml-auto transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}
+            className="absolute top-full left-0 right-0 mt-1.5 z-30 rounded-xl border border-border bg-card/95 backdrop-blur-xl shadow-2xl overflow-hidden"
+          >
+            <div className="max-h-52 overflow-y-auto py-1">
+              {allOptions.map(o => {
+                const isSel = selected.includes(o);
+                return (
+                  <button key={o} type="button" onClick={() => toggle(o)}
+                    className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left transition-colors ${isSel ? "bg-primary/10 text-primary font-semibold" : "text-foreground/80 hover:bg-muted/50"}`}>
+                    {o}
+                    {isSel && <Check className="h-3 w-3" />}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="border-t border-border p-2 flex items-center gap-1.5">
+              <input
+                value={customInput}
+                onChange={e => setCustomInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }}
+                placeholder="Add custom audience..."
+                className="flex-1 bg-background border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground focus:outline-none"
+              />
+              <button type="button" onClick={addCustom} className="p-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+                <Plus className="h-3.5 w-3.5" />
               </button>
             </div>
           </motion.div>
@@ -272,59 +288,11 @@ function ProductSwitcher({
   );
 }
 
-function ProductRow({ p, isFav, isSelected, isCursor, onSelect, onToggleFav }: {
-  p: Product; isFav: boolean; isSelected: boolean; isCursor: boolean;
-  onSelect: () => void; onToggleFav: (id: string, e: React.MouseEvent) => void;
-}) {
+function ComingSoon({ icon: Icon, message }: { icon: any; message: string }) {
   return (
-    <div onClick={onSelect}
-      className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${isCursor ? "bg-muted/60" : "hover:bg-muted/40"}`}
-    >
-      <div className={`h-6 w-6 rounded-md flex items-center justify-center shrink-0 ${isSelected ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
-        <Package className="h-3.5 w-3.5" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-foreground truncate">{p.name}</p>
-        <p className="text-[10px] text-muted-foreground truncate">{p.workspace} · {p.category}</p>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {isSelected && <Check className="h-3 w-3 text-primary" />}
-        <button onClick={e => onToggleFav(p.id, e)}
-          className={`transition-colors ${isFav ? "text-yellow-400" : "text-muted-foreground/40 hover:text-yellow-400"}`}>
-          <Star className="h-3 w-3" fill={isFav ? "currentColor" : "none"} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Product Summary Card ──────────────────────────────────────────────────────
-function ProductCard({ product }: { product: Product }) {
-  const stageColors: Record<string, string> = {
-    idea: "bg-zinc-500/10 text-zinc-500 border-zinc-500/20",
-    mvp:  "bg-blue-500/10 text-blue-500 border-blue-500/20",
-    growth: "bg-green-500/10 text-green-500 border-green-500/20",
-    scale: "bg-purple-500/10 text-purple-500 border-purple-500/20",
-  };
-  const stageClass = stageColors[product.stage.toLowerCase()] || stageColors.idea;
-  return (
-    <div className="rounded-xl border border-border bg-card/50 p-4 flex flex-wrap items-center gap-4">
-      <div className="h-9 w-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-        <Package className="h-4.5 w-4.5 text-primary" />
-      </div>
-      <div className="flex-1 min-w-0 space-y-0.5">
-        <p className="text-sm font-bold text-foreground truncate">{product.name}</p>
-        <p className="text-[10px] text-muted-foreground">{product.workspace}</p>
-      </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[10px] text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">{product.category}</span>
-        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${stageClass} capitalize`}>{product.stage}</span>
-        {product.lastSynced && (
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Clock className="h-3 w-3" /> {product.lastSynced}
-          </span>
-        )}
-      </div>
+    <div className="py-16 text-center flex flex-col items-center gap-3">
+      <Icon className="h-10 w-10 text-border" />
+      <p className="text-xs text-muted-foreground max-w-xs">{message}</p>
     </div>
   );
 }
@@ -346,11 +314,134 @@ function SaveBadge({ status }: { status: "saved" | "saving" | "unsaved" | "idle"
   );
 }
 
+// ── AI Usage Card ─────────────────────────────────────────────────────────────
+type UsageRange = "today" | "week" | "month";
+const USAGE_RANGES: Array<{ id: UsageRange; label: string }> = [
+  { id: "today", label: "Today" },
+  { id: "week", label: "Week" },
+  { id: "month", label: "Month" },
+];
+
+interface UsageStageRow { stage: string; totalTokens: number; costUsd: number; }
+interface UsageModelRow { aiModel: string; totalTokens: number; costUsd: number; }
+
+// Read-only summary — no gating/blocking on the numbers it shows, just a
+// display of what GET /api/pmx/usage reports for the signed-in user.
+function UsageCard() {
+  const [range, setRange] = useState<UsageRange>("month");
+  const [data, setData] = useState<{
+    totalTokens: number;
+    reasoningTokens: number;
+    totalCostUsd: number;
+    byStage: UsageStageRow[];
+    byModel: UsageModelRow[];
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [breakdownBy, setBreakdownBy] = useState<"model" | "stage">("model");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const headers = await getPmxHeaders();
+        const res = await fetch(`${API_URL}/pmx/usage?range=${range}`, { headers });
+        const json = await res.json();
+        if (!cancelled && json.success) setData(json.data);
+      } catch {
+        // Best-effort display only — leave the card showing its last known
+        // values (or the loading placeholder) rather than surfacing an error.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [range]);
+
+  const breakdownRows = breakdownBy === "model" ? (data?.byModel ?? []) : (data?.byStage ?? []);
+
+  return (
+    <div className="rounded-xl border border-border bg-card/30 p-4 space-y-3.5">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+          <Activity className="h-3.5 w-3.5 text-muted-foreground" /> AI Usage
+        </p>
+        <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
+          {USAGE_RANGES.map(r => (
+            <button key={r.id} type="button" onClick={() => setRange(r.id)}
+              className={`px-2 py-1 rounded-md text-[10px] font-semibold transition-colors ${range === r.id ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Tokens Used</p>
+          <p className="text-lg font-bold text-foreground mt-0.5">
+            {loading ? "—" : (data?.totalTokens ?? 0).toLocaleString()}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Reasoning Tokens</p>
+          <p className="text-lg font-bold text-foreground mt-0.5">
+            {loading ? "—" : (data?.reasoningTokens ?? 0).toLocaleString()}
+          </p>
+          <p className="text-[9px] text-muted-foreground/60 mt-0.5">Included in Tokens Used, billed as output</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Estimated Cost</p>
+          <p className="text-lg font-bold text-foreground mt-0.5">
+            {loading ? "—" : `$${(data?.totalCostUsd ?? 0).toFixed(4)}`}
+          </p>
+        </div>
+      </div>
+
+      <div className="pt-3 border-t border-border/50 space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">Cost Breakdown</p>
+          <div className="flex items-center rounded-lg border border-border bg-background p-0.5">
+            <button type="button" onClick={() => setBreakdownBy("model")}
+              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-colors ${breakdownBy === "model" ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+              <Cpu className="h-2.5 w-2.5" /> By Model
+            </button>
+            <button type="button" onClick={() => setBreakdownBy("stage")}
+              className={`px-2 py-1 rounded-md text-[10px] font-semibold transition-colors ${breakdownBy === "stage" ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+              By Stage
+            </button>
+          </div>
+        </div>
+        {loading ? (
+          <p className="text-[11px] text-muted-foreground py-1">Loading…</p>
+        ) : breakdownRows.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground py-1">No AI usage recorded for this range yet.</p>
+        ) : (
+          <div className="space-y-1">
+            {breakdownRows.map((row) => {
+              const label = breakdownBy === "model" ? (row as UsageModelRow).aiModel : (row as UsageStageRow).stage;
+              return (
+                <div key={label} className="flex items-center justify-between text-[11px]">
+                  <span className="text-foreground/80 truncate">{label}</span>
+                  <span className="flex items-center gap-2 shrink-0 text-muted-foreground">
+                    <span className="font-mono">{row.totalTokens.toLocaleString()} tok</span>
+                    <span className="font-mono font-semibold text-foreground">${row.costUsd.toFixed(4)}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function PmxSettings() {
-  const { understanding, fetchUnderstanding, deleteProject } = usePmxStore();
+  const { understanding, fetchUnderstanding, deleteProject, projectId, setProjectId, workspaces, fetchWorkspaces, startFreshWorkspace } = usePmxStore();
   const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const [activeSection, setActiveSection] = useState("product");
   const [saveStatus, setSaveStatus]       = useState<"idle" | "saved" | "saving" | "unsaved">("idle");
@@ -383,26 +474,25 @@ export default function PmxSettings() {
   const [weeklyReport, setWeeklyReport] = useState(true);
   const [monthlyPrd,   setMonthlyPrd]   = useState(false);
 
-  // ── Product switcher ──────────────────────────────────────────────────────
-  const [products, setProducts] = useState<Product[]>([]);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(() => {
-    try { return JSON.parse(localStorage.getItem(LAST_PRODUCT_KEY) || "null"); } catch { return null; }
-  });
+  // ── Product switcher — backed by real PMX workspaces ────────────────────────
+  useEffect(() => { fetchWorkspaces(); }, []);
 
-  // Seed products from understanding
+  const products: Product[] = workspaces.map(w => ({
+    id: w.projectId,
+    name: w.name,
+    category: w.isProject ? "Project" : "Source",
+    stage: "",
+    workspace: `${w.sourceCount} source${w.sourceCount === 1 ? "" : "s"}`,
+    lastSynced: timeAgo(w.updatedAt),
+  }));
+  const selectedProduct = products.find(p => p.id === projectId) ?? null;
+
+  // Populate form fields from the active workspace's understanding doc
   useEffect(() => {
-    if (understanding?.productSummary?.name) {
-      const p: Product = {
-        id: "default",
-        name: understanding.productSummary.name,
-        category: understanding.productSummary.category || "SaaS",
-        stage: understanding.productSummary.stage || "mvp",
-        workspace: "Default Workspace",
-        lastSynced: "just now",
-      };
-      setProducts([p]);
-      if (!selectedProduct) setSelectedProduct(p);
-      setName(p.name); setCategory(p.category); setStage(p.stage);
+    if (understanding?.productSummary) {
+      setName(understanding.productSummary.name || "");
+      setCategory(understanding.productSummary.category || "SaaS");
+      setStage(understanding.productSummary.stage || "mvp");
       setOneLiner(understanding.productSummary.oneLiner || "");
       setBusinessModel(understanding.businessModel || "");
       setTargetAudience(understanding.targetAudience || "");
@@ -410,15 +500,12 @@ export default function PmxSettings() {
     }
   }, [understanding]);
 
-  // Mark unsaved on any field change
+  // Marked dirty explicitly by each field's own onChange handler below —
+  // NOT by a blanket effect watching every field, which used to fire
+  // markDirty() the moment the understanding-population effect above (or
+  // even initial mount) set these same fields, flagging the form as
+  // "unsaved" before the user had touched anything.
   const markDirty = useCallback(() => setSaveStatus("unsaved"), []);
-  useEffect(() => { if (name || oneLiner) markDirty(); }, [name, oneLiner, category, stage, businessModel, targetAudience, valueProposition, model, autoAnalysis, deepReasoning, schedule, runOnPush, runOnReview, runOnError, slackNotifs, emailNotifs, weeklyReport, monthlyPrd]);
-
-  // Save product to localStorage
-  const persistProduct = (p: Product) => {
-    localStorage.setItem(LAST_PRODUCT_KEY, JSON.stringify(p));
-    setSelectedProduct(p);
-  };
 
   // Section switch with unsaved guard
   const requestSection = (id: string) => {
@@ -446,6 +533,7 @@ export default function PmxSettings() {
       const res = await fetch(`${API_URL}/pmx/understanding`, {
         method: "PUT", headers,
         body: JSON.stringify({
+          projectId,
           productSummary: { name, oneLiner, category, stage },
           businessModel, targetAudience, valueProposition,
           coreFeatures: understanding?.coreFeatures || [],
@@ -459,12 +547,8 @@ export default function PmxSettings() {
       if (json.success) {
         setSaveStatus("saved");
         fetchUnderstanding();
+        fetchWorkspaces();
         toast({ title: "Settings saved" });
-        if (selectedProduct) {
-          const updated = { ...selectedProduct, name, category, stage };
-          persistProduct(updated);
-          setProducts(ps => ps.map(p => p.id === updated.id ? updated : p));
-        }
         setTimeout(() => setSaveStatus("idle"), 2500);
       }
     } catch {
@@ -490,22 +574,13 @@ export default function PmxSettings() {
           <SectionHeader title="Product Profile" description="Core product information used by PMX to generate accurate analysis." />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Product Name"><TextInput value={name} onChange={v => { setName(v); markDirty(); }} placeholder="My Product" /></Field>
-            <Field label="Category"><TextInput value={category} onChange={v => { setCategory(v); markDirty(); }} placeholder="SaaS, Marketplace..." /></Field>
-          </div>
-          <Field label="One-liner Elevator Pitch"><TextInput value={oneLiner} onChange={v => { setOneLiner(v); markDirty(); }} placeholder="The AI product manager for..." /></Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Product Stage">
-              <Select value={stage} onChange={v => { setStage(v); markDirty(); }}>
-                <option value="idea">Idea Stage</option>
-                <option value="mvp">MVP</option>
-                <option value="growth">Growth</option>
-                <option value="scale">Enterprise Scale</option>
-              </Select>
+            <Field label="Category">
+              <CreatableSelect value={category} onChange={v => { setCategory(v); markDirty(); }} options={CATEGORY_PRESETS} placeholder="Select category..." />
             </Field>
-            <Field label="Business Model"><TextInput value={businessModel} onChange={v => { setBusinessModel(v); markDirty(); }} placeholder="SaaS, freemium, B2B..." /></Field>
           </div>
-          <Field label="Target Audience"><Textarea value={targetAudience} onChange={v => { setTargetAudience(v); markDirty(); }} placeholder="Who are your users..." /></Field>
-          <Field label="Value Proposition"><Textarea value={valueProposition} onChange={v => { setValueProposition(v); markDirty(); }} placeholder="Why customers choose you..." /></Field>
+          <Field label="Target Audience">
+            <TagMultiSelect value={targetAudience} onChange={v => { setTargetAudience(v); markDirty(); }} options={AUDIENCE_PRESETS} placeholder="Who are your users..." />
+          </Field>
 
           {/* Danger zone */}
           <div className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 p-4 space-y-2">
@@ -520,7 +595,7 @@ export default function PmxSettings() {
                 if (!window.confirm(`Delete "${name || "this product"}" and all its data? This cannot be undone.`)) return;
 
                 setDeleting(true);
-                const ok = await deleteProject(selectedProduct?.id);
+                const ok = await deleteProject(projectId);
                 setDeleting(false);
 
                 if (!ok) {
@@ -529,12 +604,12 @@ export default function PmxSettings() {
                 }
 
                 toast({ variant: "destructive", title: "Product deleted", description: "All sources, insights, and execution data have been removed." });
-                setName(""); setOneLiner(""); setCategory("SaaS"); setStage("idea");
-                setBusinessModel(""); setTargetAudience(""); setValueProposition("");
-                setSelectedProduct(null);
-                localStorage.removeItem(LAST_PRODUCT_KEY);
-                setProducts([]);
                 setSaveStatus("idle");
+
+                const remaining = workspaces.filter(w => w.projectId !== projectId);
+                if (remaining[0]) setProjectId(remaining[0].projectId);
+                else startFreshWorkspace();
+                fetchWorkspaces();
               }}
               className="flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-background hover:bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -564,6 +639,7 @@ export default function PmxSettings() {
             <Toggle value={autoAnalysis} onChange={v => { setAutoAnalysis(v); markDirty(); }} label="Auto-run Analysis" description="Re-analyzes automatically when sources change" />
             <Toggle value={deepReasoning} onChange={v => { setDeepReasoning(v); markDirty(); }} label="Deep Reasoning Mode" description="Uses more tokens for higher quality recommendations (slower)" />
           </div>
+          <UsageCard />
         </div>
       );
       case "knowledge": return (
@@ -713,12 +789,11 @@ export default function PmxSettings() {
                       toast({ title: "Save your changes first before switching products." });
                       return;
                     }
-                    persistProduct(p);
+                    setProjectId(p.id);
                   }}
-                  onCreateNew={() => toast({ title: "Create New Product", description: "Multi-product workspace coming soon." })}
-                  onManage={() => toast({ title: "Manage Products", description: "Product manager coming soon." })}
+                  onCreateNew={() => { startFreshWorkspace(); navigate("/pmx/overview"); }}
+                  onManage={() => navigate("/projects")}
                 />
-                {selectedProduct && <ProductCard product={selectedProduct} />}
               </div>
 
               {/* Divider */}
@@ -733,17 +808,6 @@ export default function PmxSettings() {
               >
                 {renderSection()}
               </motion.div>
-
-              {/* Sticky save button for form sections */}
-              {["product","ai","automation","notifications"].includes(activeSection) && saveStatus === "unsaved" && (
-                <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-                  className="sticky bottom-0 pt-4 pb-2 bg-gradient-to-t from-background to-transparent">
-                  <button onClick={() => handleSave()}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary/90 px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-all shadow-lg">
-                    <Save className="h-4 w-4" /> Save Changes
-                  </button>
-                </motion.div>
-              )}
             </div>
           </div>
         </div>

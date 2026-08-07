@@ -1,9 +1,11 @@
 import { callDeepSeek, parseJsonResponse } from "./ai/deepseek";
+import { AI_MODEL } from "./ai/models";
 import crypto from "node:crypto";
 
 export async function analyzeScreenshotUI(
   title: string,
-  model?: string
+  userId?: string,
+  projectId?: string
 ): Promise<any[]> {
   const prompt = `You are STAROX Visual PMX, a world-class AI visual design, accessibility, and UX auditor.
 Analyze the design titled "${title}" and identify concrete, high-impact usability observations, spacing issues, color contrast problems, layout flaws, visual hierarchy mistakes, or feature opportunities.
@@ -44,8 +46,8 @@ Respond ONLY with valid JSON structure of this format (do not wrap in markdown q
 }`;
 
   try {
-    const responseText = await callDeepSeek(prompt, model, 3000);
-    const parsed = parseJsonResponse(responseText);
+    const responseText = await callDeepSeek(prompt, AI_MODEL, 3000, undefined, undefined, "screenshotAnnotations", undefined, userId, projectId);
+    const parsed = parseJsonResponse(responseText, "screenshotAnnotations");
     const annotations = parsed.annotations || [];
 
     // Map properties to ensure they match our interface and contain unique IDs

@@ -35,9 +35,11 @@ export default function MermaidDiagram({ code }: { code: string }) {
   useEffect(() => {
     mounted.current = true;
     ensureInit();
-    mermaid.render(`mmd-${id}`, code.trim())
+    const renderId = `mmd-${id}`;
+    mermaid.render(renderId, code.trim())
       .then(({ svg }) => { if (mounted.current) setSvg(svg); })
-      .catch(() => { if (mounted.current) setError(true); });
+      .catch(() => { if (mounted.current) setError(true); })
+      .finally(() => { document.getElementById(`d${renderId}`)?.remove(); });
     return () => { mounted.current = false; };
   }, [code, id]);
 

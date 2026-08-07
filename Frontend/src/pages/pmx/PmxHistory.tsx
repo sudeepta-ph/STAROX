@@ -6,7 +6,7 @@ import { useToast } from "@/components/ui/use-toast";
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
 export default function PmxHistory() {
-  const { history, fetchHistory, loading, inputs, setSelectedSourceIds } = usePmxStore();
+  const { history, fetchHistory, loading, inputs, setSelectedSourceIds, projectId } = usePmxStore();
   const { toast } = useToast();
 
   const [activeTab, setActiveTab] = useState<"timeline" | "sessions">("timeline");
@@ -17,7 +17,7 @@ export default function PmxHistory() {
     setSessionsLoading(true);
     try {
       const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/history/sessions?projectId=default`, {
+      const res = await fetch(`${API_URL}/pmx/history/sessions?projectId=${encodeURIComponent(projectId)}`, {
         headers
       });
       const json = await res.json();

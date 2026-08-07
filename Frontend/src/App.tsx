@@ -38,18 +38,14 @@ import AdminMediaLibrary from "./pages/AdminMediaLibrary";
 import PmxLayout from "@/components/pmx/PmxLayout";
 import PmxOverview from "@/pages/pmx/PmxOverview";
 import PmxSources from "@/pages/pmx/PmxSources";
-import PmxEvidence from "@/pages/pmx/PmxEvidence";
 import PmxAnalysis from "@/pages/pmx/PmxAnalysis";
-import PmxProblems from "@/pages/pmx/PmxProblems";
-import PmxOpportunities from "@/pages/pmx/PmxOpportunities";
-import PmxDecisions from "@/pages/pmx/PmxDecisions";
-import PmxSolutions from "@/pages/pmx/PmxSolutions";
 import PmxInsights from "@/pages/pmx/PmxInsights";
 import PmxPrd from "@/pages/pmx/PmxPrd";
 import PmxExecution from "@/pages/pmx/PmxExecution";
 import PmxArtifacts from "@/pages/pmx/PmxArtifacts";
 import PmxHistory from "@/pages/pmx/PmxHistory";
 import PmxSettings from "@/pages/pmx/PmxSettings";
+import PmxProducts from "@/pages/pmx/PmxProducts";
 import PmxDocs from "@/pages/pmx/PmxDocs";
 
 const CLERK_PUBLISHABLE_KEY = (import.meta as any).env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -197,7 +193,6 @@ export default function App() {
             <Route path="/products/build" element={<Navigate to="/build" replace />} />
             <Route path="/products/automation" element={<Navigate to="/automation" replace />} />
             <Route path="/products/teams" element={<Navigate to="/teams" replace />} />
-            <Route path="/solutions" element={<ComingSoon title="STAROX Solutions" description="Tailored workspaces and intelligence pipelines for founders, product managers, designers, marketing, sales, HR, and operations. Launching soon." />} />
             <Route path="/solutions/:segment" element={<ComingSoon title="STAROX Solutions" description="Tailored workspace and intelligence pipelines for your specific team or use case. Launching soon." />} />
             <Route path="/starox-intelligence/community" element={<ComingSoon title="STAROX Community" description="A space for builders, founders, and teams using STAROX to connect, share, and grow together. Early access coming soon." />} />
             <Route path="/build" element={<ComingSoon title="STAROX BUILD" description="Websites, apps & SaaS development powered by AI. Full-stack builds, design-to-deployment pipelines, and production-ready products — launching soon." />} />
@@ -210,7 +205,9 @@ export default function App() {
             {/* Protected Workspace Routes */}
             <Route element={<ProtectedRoute />}>
               <Route path="/teams" element={<Teams />} />
-              <Route path="/edits" element={<Navigate to="/teams" replace />} />
+              <Route path="/teams/edits" element={<TeamsEdits />} />
+              <Route path="/teams/teamx" element={<TeamsTeamX />} />
+              <Route path="/edits" element={<Navigate to="/teams/edits" replace />} />
               <Route path="/product-intelligence" element={<Index />} />
               <Route path="/agent/:agentId" element={<AgentPage />} />
               <Route path="/agents" element={<Agents />} />
@@ -231,6 +228,7 @@ export default function App() {
               <Route path="/pmx" element={<PmxLayout />}>
                 <Route index element={<Navigate to="/pmx/overview" replace />} />
                 <Route path="overview" element={<PmxOverview />} />
+                <Route path="products" element={<PmxProducts />} />
                 <Route path="sources" element={<PmxSources />} />
                 <Route path="analysis" element={<PmxAnalysis />} />
                 <Route path="insights" element={<PmxInsights />} />

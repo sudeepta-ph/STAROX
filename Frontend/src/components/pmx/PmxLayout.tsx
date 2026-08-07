@@ -13,11 +13,24 @@ import {
   Settings,
   HelpCircle,
   Command,
+  Layers,
+  X,
 } from "lucide-react";
 import { usePmxStore } from "@/lib/pmxStore";
 import Sidebar from "@/components/Sidebar";
 import { useSidebarStore } from "@/lib/sidebarStore";
-import AskPmx from "@/components/pmx/AskPmx";
+import { type Product } from "@/components/pmx/ProductSwitcher";
+
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 const pmxNav = [
   { name: "Overview",  icon: LayoutDashboard, path: "/pmx/overview",  shortcut: "g o" },
@@ -28,7 +41,7 @@ const pmxNav = [
   { name: "Execution", icon: Award,           path: "/pmx/execution", shortcut: "g x" },
   { name: "Artifacts", icon: Lightbulb,       path: "/pmx/artifacts", shortcut: "g r" },
   { name: "History",   icon: Clock,           path: "/pmx/history",   shortcut: "g h" },
-  { name: "PMX Settings", icon: Settings, path: "/settings", shortcut: "g ," },
+  { name: "PMX Settings", icon: Settings, path: "/pmx/settings", shortcut: "g ," },
 ];
 
 function useIsMobile() {
@@ -44,16 +57,31 @@ function useIsMobile() {
 export default function PmxLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { fetchAll, loading } = usePmxStore();
+  const { fetchAll, loading, fetchWorkspaces, workspaces, projectId, setProjectId, startFreshWorkspace, openTabIds, closeWorkspaceTab } = usePmxStore();
   const { collapsed } = useSidebarStore();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const isMobile = useIsMobile();
 
+  const products: Product[] = workspaces.map((w) => ({
+    id: w.projectId,
+    name: w.name,
+    category: w.isProject ? "Project" : "Source",
+    stage: "",
+    workspace: `${w.sourceCount} source${w.sourceCount === 1 ? "" : "s"}`,
+    lastSynced: timeAgo(w.updatedAt),
+  }));
+  // Only ever show a tab for a workspace that's actually real — an open
+  // "tab" pointing at a projectId with no materialized workspace (fresh,
+  // or since deleted) has nothing to show, so it's dropped rather than
+  // rendered as a blank/placeholder pill. Home covers that state instead.
+  const realOpenTabIds = openTabIds.filter((id) => products.some((p) => p.id === id));
+
   // Initial fetch of all state data
   useEffect(() => {
     fetchAll();
-  }, [fetchAll]);
+    fetchWorkspaces();
+  }, [fetchAll, fetchWorkspaces]);
 
   // Keyboard Shortcuts (Linear-style)
   useEffect(() => {
@@ -87,7 +115,7 @@ export default function PmxLayout() {
         if (key === "x") navigate("/pmx/execution");
         if (key === "r") navigate("/pmx/artifacts");
         if (key === "h") navigate("/pmx/history");
-        if (key === ",") navigate("/settings");
+        if (key === ",") navigate("/pmx/settings");
         lastKey = "";
       } else if (key === "g") {
         lastKey = "g";
@@ -115,8 +143,8 @@ export default function PmxLayout() {
       >
         
         {/* Topbar Header */}
-        <header className="hidden md:flex h-14 items-center justify-between border-b border-border/50 px-6 bg-background/80 backdrop-blur-md shrink-0 select-none">
-          <div className="flex items-center gap-4">
+        <header className="hidden md:flex h-14 items-center justify-between border-b border-border/50 px-6 bg-background/80 backdrop-blur-md shrink-0 select-none relative z-20">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setSearchOpen(true)}
               className="flex items-center gap-2.5 w-64 px-3 py-1.5 rounded-xl bg-muted/40 hover:bg-muted/65 border border-border hover:border-border/80 text-muted-foreground text-left text-xs transition-colors"
@@ -127,6 +155,50 @@ export default function PmxLayout() {
                 ⌘K
               </kbd>
             </button>
+            <div className="flex items-center gap-1 max-w-[420px] overflow-x-auto">
+              <button
+                onClick={() => { startFreshWorkspace(); navigate("/pmx/overview"); }}
+                title="Start something new"
+                className={`flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                  realOpenTabIds.includes(projectId)
+                    ? "border-transparent text-muted-foreground hover:bg-muted/30 hover:text-foreground/80"
+                    : "border-border bg-muted/60 text-foreground hover:bg-muted"
+                }`}
+              >
+                <LayoutDashboard className="h-3 w-3 shrink-0" />
+                Home
+              </button>
+              {realOpenTabIds.map((id) => {
+                const tabProduct = products.find((p) => p.id === id);
+                const active = id === projectId;
+                return (
+                  <div
+                    key={id}
+                    onClick={() => setProjectId(id)}
+                    className={`group flex shrink-0 items-center gap-1 rounded-lg border py-1.5 pl-2.5 pr-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                      active
+                        ? "border-border bg-muted/60 text-foreground"
+                        : "border-transparent text-muted-foreground hover:bg-muted/30 hover:text-foreground/80"
+                    }`}
+                  >
+                    <Layers className="h-3 w-3 shrink-0 text-muted-foreground" />
+                    <span className="max-w-[110px] truncate">{tabProduct?.name}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const wasLast = realOpenTabIds.length === 1;
+                        closeWorkspaceTab(id);
+                        if (wasLast) navigate("/pmx/overview");
+                      }}
+                      title="Close tab"
+                      className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted-foreground/20 group-hover:opacity-100"
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
           
           <div className="flex items-center gap-3">
@@ -152,9 +224,6 @@ export default function PmxLayout() {
           <Outlet />
         </main>
       </div>
-
-      {/* Ask PMX floating assistant */}
-      <AskPmx />
 
       {/* ── COMMAND PALETTE SEARCH MODAL ────────────────────────────── */}
       <AnimatePresence>

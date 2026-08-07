@@ -1,3 +1,18 @@
+// UNMOUNTED as of 2026-08-07 — this router is no longer app.use()'d in
+// app.ts, so /cdx1/generate, /cdx2/generate, /cdx3/generate all 404.
+//
+// Why: a full-codebase trace found zero reachable frontend call sites for
+// any of the three routes. `runStarox1`/`startStarox2Analysis`/
+// `startStarox3Analysis` (Frontend/src/lib/api.ts, store.ts) either have no
+// caller at all, or their one caller chain (Index.tsx's Starox2HeroInput)
+// is imported but never rendered. The "STAROX-1/2/3" cards still visible on
+// Agents.tsx route into /pmx instead, unrelated to this file. Meanwhile
+// these routes had no authMiddleware — `userId` was a client-supplied,
+// unauthenticated body field passed straight into the credits ledger
+// (services/credits.ts), auto-creating a credited User record for any
+// caller-declared id. Unmounted rather than deleted so the feature can be
+// picked back up later — if you do, re-mount in app.ts AND add real auth
+// before doing so.
 import { Router } from "express";
 import { z } from "zod";
 import { ensureCredits, consumeCredits } from "../../../services/credits";
@@ -70,7 +85,7 @@ cdxRouter.post("/cdx1/generate", async (req, res, next) => {
     const prompt = parts.join("\n\n---\n\n");
 
     const cost = await ensureCredits(body.userId, body.planTier, "cdx1");
-    const output = await generateCdxOutput("cdx1", body.model, prompt);
+    const output = await generateCdxOutput("cdx1", body.model, prompt, body.userId, body.projectId);
     await consumeCredits(body.userId, cost);
 
     // Parse the JSON from sections[0]
@@ -107,7 +122,7 @@ cdxRouter.post("/cdx2/generate", async (req, res, next) => {
       reviews: body.reviews,
       screenshotText: body.screenshotText,
       repo: body.repo,
-    }));
+    }), body.userId, body.projectId);
     await consumeCredits(body.userId, cost);
 
     let parsed: Record<string, unknown> = {};
@@ -134,7 +149,7 @@ cdxRouter.post("/cdx3/generate", async (req, res, next) => {
       productDescription: body.productDescription,
       targetAudience: body.targetAudience,
       seoKeywords: body.seoKeywords,
-    }));
+    }), body.userId, body.projectId);
     await consumeCredits(body.userId, cost);
 
     let parsed: Record<string, unknown> = {};

@@ -1,28 +1,44 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Loader2, Check, User, Mail, Phone, Globe, MessageSquare } from "lucide-react";
+
+const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
 interface ContactModalProps {
   isOpen: boolean;
   onClose: () => void;
   context?: string;
+  /** Pre-fills the "what are you trying to solve?" field when the modal opens. */
+  initialProblem?: string;
 }
 
-const smoothEase = [0.22, 1, 0.36, 1] as const;export default function ContactModal({ isOpen, onClose, context }: ContactModalProps) {
+const smoothEase = [0.22, 1, 0.36, 1] as const;export default function ContactModal({ isOpen, onClose, context, initialProblem }: ContactModalProps) {
   const [firstName, setFirstName]   = useState("");
   const [lastName, setLastName]     = useState("");
   const [email, setEmail]           = useState("");
   const [phone, setPhone]           = useState("");
   const [website, setWebsite]       = useState("");
   const [problem, setProblem]       = useState("");
+  // Honeypot — never rendered visibly, real users never see or fill it.
+  // Backend treats a non-empty value as a bot filling every field and
+  // silently no-ops. Left permanently blank by legitimate submissions.
+  const [companyFax, setCompanyFax] = useState("");
   const [loading, setLoading]       = useState(false);
   const [sent, setSent]             = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+
+  // The modal stays mounted between opens (only its content is conditionally
+  // rendered via AnimatePresence below), so state doesn't reset on its own —
+  // reseed the field each time it's opened with fresh context.
+  useEffect(() => {
+    if (isOpen && initialProblem) setProblem(initialProblem);
+  }, [isOpen, initialProblem]);
 
   const reset = () => {
     setFirstName(""); setLastName(""); setEmail("");
-    setPhone(""); setWebsite(""); setProblem("");
-    setSent(false);
+    setPhone(""); setWebsite(""); setProblem(""); setCompanyFax("");
+    setSent(false); setError(null);
   };
 
   const handleClose = () => { onClose(); setTimeout(reset, 300); };
@@ -30,9 +46,24 @@ const smoothEase = [0.22, 1, 0.36, 1] as const;export default function ContactMo
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 1300));
-    setLoading(false);
-    setSent(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/contact/demo-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, email, phone, website, problem, context, companyFax }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSent(true);
+      } else {
+        setError(json.error || "Something went wrong. Please try again.");
+      }
+    } catch {
+      setError("Couldn't reach the server. Please check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const inputCls =
@@ -108,6 +139,21 @@ const smoothEase = [0.22, 1, 0.36, 1] as const;export default function ContactMo
                     </p>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
+                      {/* Honeypot — real users never see this field; kept
+                          off-screen rather than display:none since some bots
+                          specifically skip display:none/visibility:hidden
+                          fields. Never shown, never intentionally filled. */}
+                      <input
+                        type="text"
+                        name="companyFax"
+                        value={companyFax}
+                        onChange={(e) => setCompanyFax(e.target.value)}
+                        tabIndex={-1}
+                        autoComplete="off"
+                        aria-hidden="true"
+                        className="absolute -left-[9999px] top-0 h-px w-px overflow-hidden opacity-0"
+                      />
+
                       {/* name row */}
                       <div className="grid grid-cols-2 gap-3">
                         <div>
@@ -158,12 +204,12 @@ const smoothEase = [0.22, 1, 0.36, 1] as const;export default function ContactMo
 
                       {/* company website */}
                       <div>
-                        <label className={labelCls}>Company website <span className="text-white/25">*</span></label>
+                        <label className={labelCls}>Company website</label>
                         <div className="relative">
                           <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-white/20 pointer-events-none" />
                           <input
                             type="text" placeholder="e.g. company.com" value={website}
-                            onChange={(e) => setWebsite(e.target.value)} required
+                            onChange={(e) => setWebsite(e.target.value)}
                             className={`${inputCls} pl-9`}
                           />
                         </div>
@@ -171,11 +217,11 @@ const smoothEase = [0.22, 1, 0.36, 1] as const;export default function ContactMo
 
                       {/* problem */}
                       <div>
-                        <label className={labelCls}>What are you trying to solve? <span className="text-white/25">*</span></label>
+                        <label className={labelCls}>What are you trying to solve?</label>
                         <div className="relative">
                           <MessageSquare className="absolute left-3 top-3 w-3.5 h-3.5 text-white/20 pointer-events-none" />
                           <textarea
-                            rows={4} required
+                            rows={4}
                             placeholder="We need to streamline our design approval process and reduce time to deployment..."
                             value={problem}
                             onChange={(e) => setProblem(e.target.value)}
@@ -183,6 +229,10 @@ const smoothEase = [0.22, 1, 0.36, 1] as const;export default function ContactMo
                           />
                         </div>
                       </div>
+
+                      {error && (
+                        <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">{error}</p>
+                      )}
 
                       <button
                         type="submit"

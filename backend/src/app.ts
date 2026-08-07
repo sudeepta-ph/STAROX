@@ -4,7 +4,6 @@ import helmet from "helmet";
 import morgan from "morgan";
 import { env } from "./config/env";
 import { healthRouter } from "./api/routes/health";
-import { cdxRouter } from "./workspaces/pmx/routes/cdx";
 import { proxyRouter } from "./workspaces/pmx/routes/proxy";
 import { screenshotRouter } from "./workspaces/pmx/routes/screenshot";
 import { integrationsRouter } from "./workspaces/pmx/routes/integrations";
@@ -14,6 +13,7 @@ import { notionRouter } from "./workspaces/pmx/routes/notion";
 import { slackRouter } from "./workspaces/pmx/routes/slack";
 import { connectorsRouter } from "./workspaces/pmx/routes/connectors";
 import { blogRouter } from "./api/routes/blogRoutes.js";
+import { contactRouter } from "./api/routes/contact";
 import { pmxRouter } from "./workspaces/pmx/routes/pmx";
 import { errorHandler } from "./middleware/errorHandler";
 
@@ -44,7 +44,6 @@ app.use(express.json({ limit: "10mb" }));
 app.use(morgan("tiny"));
 
 app.use("/health", healthRouter);
-app.use("/api", cdxRouter);
 app.use("/api", integrationsRouter);
 app.use("/api", githubRouter);
 app.use("/api", googleRouter);
@@ -52,6 +51,7 @@ app.use("/api", notionRouter);
 app.use("/api", slackRouter);
 app.use("/api", connectorsRouter);
 app.use("/api", blogRouter);
+app.use("/api", contactRouter);
 app.use("/api/pmx", pmxRouter);
 app.use("/", proxyRouter);
 

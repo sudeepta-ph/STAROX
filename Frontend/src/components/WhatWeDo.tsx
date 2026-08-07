@@ -26,12 +26,12 @@ function FeatureBlock({ title, description, imageContent, reverse }: FeatureRow)
     >
       {/* text side */}
       <div className="flex-1 flex flex-col justify-center py-2">
-        <h3 className="text-lg font-bold text-white leading-snug mb-3">{title}</h3>
-        <p className="text-sm leading-6 text-white/42 max-w-sm">{description}</p>
+        <h3 className="text-lg font-bold text-foreground leading-snug mb-3">{title}</h3>
+        <p className="text-sm leading-6 text-muted-foreground max-w-sm">{description}</p>
       </div>
 
       {/* image/visual side */}
-      <div className="flex-1 rounded-2xl border border-white/[0.07] bg-[#0e0e15] overflow-hidden min-h-[180px] lg:min-h-[220px] flex items-center justify-center">
+      <div className="flex-1 rounded-2xl border border-border/50 bg-card overflow-hidden min-h-[180px] lg:min-h-[220px] flex items-center justify-center">
         {imageContent}
       </div>
     </motion.div>
@@ -40,7 +40,7 @@ function FeatureBlock({ title, description, imageContent, reverse }: FeatureRow)
 
 export default function WhatWeDo({ headline, subline, rows }: WhatWeDoProps) {
   return (
-    <section className="w-full border-t border-white/[0.05] bg-[#08080d]">
+    <section className="w-full border-t border-border/40 bg-background">
       <div className="max-w-5xl mx-auto px-6 lg:px-12 py-16">
 
         {/* section header */}
@@ -51,10 +51,10 @@ export default function WhatWeDo({ headline, subline, rows }: WhatWeDoProps) {
           transition={{ duration: 0.42, ease: smoothEase }}
           className="mb-12"
         >
-          <h2 className="text-2xl sm:text-3xl font-bold text-white leading-tight mb-3 max-w-lg">
+          <h2 className="text-2xl sm:text-3xl font-bold text-foreground leading-tight mb-3 max-w-lg">
             {headline}
           </h2>
-          <p className="text-sm leading-6 text-white/38 max-w-md">{subline}</p>
+          <p className="text-sm leading-6 text-muted-foreground max-w-md">{subline}</p>
         </motion.div>
 
         {/* feature rows */}

@@ -427,8 +427,14 @@ export interface IPmxSolution extends Document {
     updatedBy: string;
     prd: string;
     techSpecs: string;
+    // The chat pair that produced this snapshot — absent on entries written
+    // before this was tracked. Lets the frontend rebuild the refine chat
+    // log on reopen instead of only keeping it for the live session.
+    instruction?: string;
+    changeSummary?: string;
   }>;
   sourceInputIds?: string[];
+  combinedFromSolutionIds?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -455,6 +461,7 @@ const PmxSolutionSchema = new Schema<IPmxSolution>(
     edgeCases: { type: String },
     version: { type: Number, default: 1 },
     sourceInputIds: [{ type: String }],
+    combinedFromSolutionIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
     history: [
       {
@@ -462,6 +469,8 @@ const PmxSolutionSchema = new Schema<IPmxSolution>(
         updatedBy: { type: String },
         prd: { type: String },
         techSpecs: { type: String },
+        instruction: { type: String },
+        changeSummary: { type: String },
       },
     ],
   },
@@ -477,6 +486,7 @@ export interface IPmxExecutionTask extends Document {
   projectId: string;
   userId: string;
   solutionId?: string;
+  ideaPrdId?: string;
   title: string;
   description: string;
   type: "frontend" | "backend" | "infra" | "testing" | "deployment" | "ux";
@@ -497,6 +507,7 @@ const PmxExecutionTaskSchema = new Schema<IPmxExecutionTask>(
     projectId: { type: String, required: true, index: true },
     userId: { type: String, required: true, index: true },
     solutionId: { type: String },
+    ideaPrdId: { type: String },
     title: { type: String, required: true },
     description: { type: String, required: true },
     type: {
@@ -810,7 +821,10 @@ export interface IPmxIdeaPrd extends Document {
   markdown: string;
   stack: IPmxIdeaPrdStack;
   assumptions: string[];
+  pages: Array<{ name: string; purpose: string }>;
+  layout?: string;
   history: Array<{ role: "user" | "assistant"; content: string; createdAt: Date }>;
+  versions: Array<{ version: number; markdown: string; stack: IPmxIdeaPrdStack; createdAt: Date }>;
   version: number;
   tokensUsed: number;
   aiModel: string;
@@ -838,10 +852,33 @@ const PmxIdeaPrdSchema = new Schema<IPmxIdeaPrd>(
       architecture: { type: String },
     },
     assumptions: [{ type: String }],
+    pages: [
+      {
+        name: { type: String },
+        purpose: { type: String },
+      },
+    ],
+    layout: { type: String },
     history: [
       {
         role: { type: String, enum: ["user", "assistant"] },
         content: { type: String },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
+    versions: [
+      {
+        version: { type: Number },
+        markdown: { type: String },
+        stack: {
+          frontend: { type: String },
+          backend: { type: String },
+          database: { type: String },
+          cloud: { type: String },
+          authProvider: { type: String },
+          aiProvider: { type: String },
+          architecture: { type: String },
+        },
         createdAt: { type: Date, default: Date.now },
       },
     ],
@@ -957,3 +994,43 @@ const PmxSlackConnectionSchema = new Schema<IPmxSlackConnection>(
 );
 
 export const PmxSlackConnectionModel = mongoose.model<IPmxSlackConnection>("PmxSlackConnection", PmxSlackConnectionSchema);
+
+// ==========================================
+// 20. AI TOKEN USAGE TRACKING
+// ==========================================
+export interface IPmxTokenUsage extends Document {
+  userId: string;
+  projectId: string;
+  stage: string;
+  aiModel: string;
+  promptTokens: number;
+  completionTokens: number;
+  // Breakdown only — DeepSeek's own completionTokens/totalTokens already
+  // include reasoning tokens (verified against a live API response: a
+  // reasoning-model call reported completion_tokens=9 for a 2-token visible
+  // reply, with completion_tokens_details.reasoning_tokens=7 accounting for
+  // the rest). This field exists so reasoning spend is visible as its own
+  // line item, not to be added on top of completionTokens/totalTokens —
+  // doing so would double-count it.
+  reasoningTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  createdAt: Date;
+}
+
+const PmxTokenUsageSchema = new Schema<IPmxTokenUsage>(
+  {
+    userId: { type: String, required: true, index: true },
+    projectId: { type: String, required: true, index: true },
+    stage: { type: String, required: true },
+    aiModel: { type: String, required: true },
+    promptTokens: { type: Number, required: true },
+    completionTokens: { type: Number, required: true },
+    reasoningTokens: { type: Number, required: true, default: 0 },
+    totalTokens: { type: Number, required: true },
+    costUsd: { type: Number, required: true },
+  },
+  { timestamps: { createdAt: true, updatedAt: false } }
+);
+
+export const PmxTokenUsageModel = mongoose.model<IPmxTokenUsage>("PmxTokenUsage", PmxTokenUsageSchema);

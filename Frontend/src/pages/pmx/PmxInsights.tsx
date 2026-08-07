@@ -6,9 +6,11 @@ import {
   Sparkles, AlertTriangle, Lightbulb, CheckSquare, FileText,
   ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, ArrowRight,
   MessageSquare, BarChart3, Cpu, TrendingUp, Users, DollarSign,
-  Search, Filter, Zap, Circle, CheckCircle2, X
+  Search, Filter, Zap, Circle, CheckCircle2
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { ToastAction } from "@/components/ui/toast";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
@@ -55,6 +57,8 @@ export default function PmxInsights() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("all");
   const [searchQuery, setSearchQuery]   = useState("");
   const [updatingId, setUpdatingId]     = useState<string | null>(null);
+  const [selectedIds, setSelectedIds]   = useState<string[]>([]);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
   // For each decision, find its linked opportunity and problems
   const getLinkedOpportunity = (dec: any) =>
@@ -88,7 +92,11 @@ export default function PmxInsights() {
       const res = await fetch(`${API_URL}/pmx/decisions/${id}/status`, { method: "PUT", headers, body: JSON.stringify({ status: "approved" }) });
       const json = await res.json();
       if (json.success) {
-        toast({ title: "Approved — PRD generating", description: "Blueprint queued in PRD workspace." });
+        toast({
+          title: "Approved — PRD generating",
+          description: "Blueprint queued in PRD workspace.",
+          action: <ToastAction altText="Open PRD" onClick={() => navigate("/pmx/prd")}>Open PRD</ToastAction>,
+        });
         fetchDecisions(); fetchSolutions();
       }
     } catch { toast({ variant: "destructive", title: "Error" }); }
@@ -111,20 +119,80 @@ export default function PmxInsights() {
     navigate("/pmx/prd");
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const updateDecisionStatus = async (id: string, status: "approved" | "rejected") => {
+    const headers = await getPmxHeaders();
+    const res = await fetch(`${API_URL}/pmx/decisions/${id}/status`, { method: "PUT", headers, body: JSON.stringify({ status }) });
+    return res.json();
+  };
+
+  // Approvals each trigger a synchronous Solution Studio AI call on the
+  // backend — run them one at a time rather than in parallel so a bulk
+  // approve doesn't fire a burst of concurrent AI requests.
+  const handleBulkApprove = async () => {
+    // Re-check status at call time — a selected item may have already been
+    // approved/rejected individually since it was checked, and re-running
+    // approve on it would fire a duplicate Solution Studio generation.
+    const ids = selectedIds.filter(id => decisions.find(d => d._id === id)?.status === "pending");
+    if (ids.length === 0) return;
+    setBulkProcessing(true);
+    toast({ title: `Approving ${ids.length} recommendation${ids.length === 1 ? "" : "s"}...`, description: "Generating PRD blueprints — this can take a moment." });
+    try {
+      for (const id of ids) await updateDecisionStatus(id, "approved");
+      toast({
+        title: "Approved",
+        description: `${ids.length} recommendation${ids.length === 1 ? "" : "s"} approved — blueprints queued in PRD workspace.`,
+        action: <ToastAction altText="Open PRD" onClick={() => navigate("/pmx/prd")}>Open PRD</ToastAction>,
+      });
+    } catch {
+      toast({ variant: "destructive", title: "Some approvals failed", description: "Refresh to see which ones went through." });
+    } finally {
+      setSelectedIds([]);
+      setBulkProcessing(false);
+      fetchDecisions(); fetchSolutions();
+    }
+  };
+
+  const handleBulkReject = async () => {
+    const ids = selectedIds.filter(id => decisions.find(d => d._id === id)?.status === "pending");
+    if (ids.length === 0) return;
+    setBulkProcessing(true);
+    try {
+      await Promise.all(ids.map(id => updateDecisionStatus(id, "rejected")));
+      toast({ title: `Rejected ${ids.length} recommendation${ids.length === 1 ? "" : "s"}` });
+    } catch {
+      toast({ variant: "destructive", title: "Some rejections failed", description: "Refresh to see which ones went through." });
+    } finally {
+      setSelectedIds([]);
+      setBulkProcessing(false);
+      fetchDecisions();
+    }
+  };
+
   const isEmpty = decisions.length === 0;
+  const pendingFiltered = filtered.filter(d => d.status === "pending");
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6 pb-24">
 
       {/* ── PAGE HEADER ─────────────────────────────────────────── */}
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-bold text-foreground">AI Product Insights</h1>
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
+            <h1 className="text-xl font-bold text-foreground">AI Product Insights</h1>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            What should we build, fix, or improve — and why?
+          </p>
         </div>
-        <p className="text-xs text-muted-foreground">
-          What should we build, fix, or improve — and why?
-        </p>
+        <button onClick={() => navigate("/pmx/analysis")}
+          className="shrink-0 flex items-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 px-3.5 py-2 text-xs font-bold text-black shadow-[0_0_14px_rgba(14,165,233,0.35)] transition-all">
+          <TrendingUp className="h-3.5 w-3.5" /> Run AI Experience Intelligence
+        </button>
       </div>
 
       {/* ── REASONING FLOW HEADER BAR ────────────────────────────── */}
@@ -159,6 +227,44 @@ export default function PmxInsights() {
         ))}
       </div>
 
+      {/* ── BULK SELECTION BAR ──────────────────────────────────── */}
+      {pendingFiltered.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-card/20 px-3 py-2">
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] text-muted-foreground">{selectedIds.length} of {pendingFiltered.length} pending selected</span>
+            <button
+              onClick={() => setSelectedIds(pendingFiltered.map(d => d._id))}
+              className="text-[10px] text-muted-foreground hover:text-primary transition-colors"
+            >
+              Select all pending
+            </button>
+            {selectedIds.length > 0 && (
+              <>
+                <span className="text-border text-xs">|</span>
+                <button onClick={() => setSelectedIds([])} className="text-[10px] text-muted-foreground hover:text-destructive transition-colors">
+                  Clear
+                </button>
+              </>
+            )}
+          </div>
+          {selectedIds.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button onClick={handleBulkReject} disabled={bulkProcessing}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:border-foreground/30 hover:bg-muted text-muted-foreground hover:text-foreground transition-all text-xs disabled:opacity-50">
+                <ThumbsDown className="h-3 w-3" /> Reject {selectedIds.length}
+              </button>
+              <button onClick={handleBulkApprove} disabled={bulkProcessing}
+                className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition-all disabled:opacity-50">
+                {bulkProcessing
+                  ? <div className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                  : <ThumbsUp className="h-3 w-3 fill-current" />}
+                Approve {selectedIds.length}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── EMPTY STATE ─────────────────────────────────────────── */}
       {isEmpty && (
         <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
@@ -173,7 +279,7 @@ export default function PmxInsights() {
             <button onClick={() => navigate("/pmx/sources")} className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-4 py-2 text-xs font-semibold text-primary-foreground transition-all">
               Connect Sources
             </button>
-            <button onClick={() => navigate("/pmx/analysis")} className="flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-4 py-2 text-xs font-medium text-muted-foreground transition-all">
+            <button onClick={() => setAiPanelOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-4 py-2 text-xs font-medium text-muted-foreground transition-all">
               Run Analysis
             </button>
           </div>
@@ -200,6 +306,13 @@ export default function PmxInsights() {
               {/* ── TOP: Status + Title + Confidence ── */}
               <div className="p-5 space-y-3">
                 <div className="flex items-start gap-4">
+                  {isPending && (
+                    <Checkbox
+                      checked={selectedIds.includes(dec._id)}
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(dec._id); }}
+                      className="mt-3.5 shrink-0"
+                    />
+                  )}
                   <ConfidenceRing value={dec.confidence} />
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-1.5">
@@ -244,7 +357,8 @@ export default function PmxInsights() {
                     } label={ev.title.slice(0, 28)} color="bg-primary/5 border-primary/20 text-primary" />
                   ))}
                   {linkedProbs.slice(0, 1).map((p, i) => (
-                    <EvidencePill key={`p-${i}`} icon={AlertTriangle} label={p.title.slice(0, 28)}
+                    <EvidencePill key={`p-${i}`} icon={AlertTriangle}
+                      label={p.title.length > 28 ? `${p.title.slice(0, 28)}…` : p.title}
                       color="bg-primary/5 border-primary/20 text-primary" />
                   ))}
                 </div>

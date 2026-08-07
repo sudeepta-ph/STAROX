@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { toast } from "@/components/ui/use-toast";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
@@ -8,6 +9,23 @@ export async function getPmxHeaders() {
     "Content-Type": "application/json",
     Authorization: `Bearer ${token}`
   };
+}
+
+const DAILY_CAP_MESSAGE = "You've hit today's AI usage limit, resets at midnight.";
+
+// Shared fetch wrapper for PMX endpoints — adds auth headers and gives the
+// backend's 402 "daily AI usage cap" response (see backend pmx.ts /
+// deepseek.ts UsageCapExceededError) a clear toast instead of it reading as
+// a generic/unexplained failure at each call site.
+export async function pmxFetch(url: string, options: RequestInit = {}) {
+  const headers = await getPmxHeaders();
+  const res = await fetch(url, { ...options, headers: { ...headers, ...(options.headers as Record<string, string> | undefined) } });
+  const json = await res.json().catch(() => ({ success: false, error: "Request failed" }));
+  if (res.status === 402) {
+    json.error = DAILY_CAP_MESSAGE;
+    toast({ variant: "destructive", title: "Daily AI usage limit reached", description: DAILY_CAP_MESSAGE });
+  }
+  return json;
 }
 
 export interface PmxInput {
@@ -50,21 +68,6 @@ export interface PmxEvidence {
   importance: number;
   relatedFeatures: string[];
   relatedProblems: string[];
-  createdAt: string;
-}
-
-export interface PmxAnalysis {
-  _id: string;
-  title: string;
-  score: number;
-  report: {
-    websiteUrl: string;
-    navigation: string;
-    accessibility: string;
-    performance: string;
-    flows: Array<{ flowName: string; stepCount: number; dropOffRate: number; isDuplicate: boolean }>;
-    issues: Array<{ issue: string; severity: "critical" | "high" | "medium" | "low"; recommendation: string }>;
-  };
   createdAt: string;
 }
 
@@ -125,6 +128,7 @@ export interface PmxSolution {
   uxImprovements?: string;
   edgeCases?: string;
   version: number;
+  combinedFromSolutionIds?: string[];
 }
 
 export interface PmxExecutionTask {
@@ -158,12 +162,50 @@ export interface PmxAuditLog {
   createdAt: string;
 }
 
+export interface PmxWorkspaceSummary {
+  projectId: string;
+  name: string;
+  sourceCount: number;
+  isProject: boolean;
+  primarySource: { _id: string; name: string; url?: string; type: string } | null;
+  updatedAt: string;
+}
+
+const ACTIVE_PROJECT_KEY = "pmx_active_project_id";
+const OPEN_TABS_KEY = "pmx_open_tabs";
+
+// Deliberately does NOT force the currently-active projectId into the
+// returned list. Doing so used to mean an ephemeral, never-promoted "Home"
+// workspace (see startFreshWorkspace) got treated as a real open tab the
+// moment the page reloaded — since ACTIVE_PROJECT_KEY persists across
+// reloads but a fresh workspace is intentionally never added to
+// pmx_open_tabs until promoteToTab actually promotes it. Only the
+// genuinely-persisted tab list should ever count as "open."
+function loadOpenTabs(): string[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(OPEN_TABS_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveOpenTabs(ids: string[]) {
+  if (typeof localStorage !== "undefined") localStorage.setItem(OPEN_TABS_KEY, JSON.stringify(ids));
+}
+
 interface PmxStore {
   projectId: string;
+  openTabIds: string[];
+  closeWorkspaceTab: (id: string) => void;
   inputs: PmxInput[];
   understanding: PmxUnderstanding | null;
+  // Latest Idea→PRD doc for the active workspace, if the idea-input path was
+  // used. Kept in the global store (rather than fetched locally by each
+  // page) so nav-gating logic (e.g. the sidebar) can read it too.
+  ideaPrd: any | null;
   evidence: PmxEvidence[];
-  analysis: PmxAnalysis[];
   problems: PmxProblem[];
   opportunities: PmxOpportunity[];
   decisions: PmxDecision[];
@@ -176,7 +218,6 @@ interface PmxStore {
     inputs: boolean;
     understanding: boolean;
     evidence: boolean;
-    analysis: boolean;
     problems: boolean;
     opportunities: boolean;
     decisions: boolean;
@@ -187,11 +228,26 @@ interface PmxStore {
     pipeline: boolean;
   };
 
+  workspaces: PmxWorkspaceSummary[];
+  workspacesLoading: boolean;
+
   setProjectId: (id: string) => void;
+  // Switches to a brand-new, not-yet-real workspace context — no backend
+  // call, and deliberately not added to openTabIds. It only becomes a real
+  // workspace (and gets a tab) the moment an idea is generated or a source
+  // is connected under it — see promoteToTab.
+  startFreshWorkspace: () => void;
+  // Adds a projectId to the open tabs and refreshes the workspace list —
+  // called once a fresh workspace materializes server-side (idea generated
+  // or first source connected) so its real name shows up immediately.
+  promoteToTab: (id: string) => void;
+  fetchWorkspaces: () => Promise<void>;
+  createWorkspace: (name?: string) => Promise<string>;
+  renameWorkspace: (projectId: string, name: string) => Promise<boolean>;
   fetchInputs: () => Promise<void>;
   fetchUnderstanding: () => Promise<void>;
+  fetchIdeaPrd: () => Promise<void>;
   fetchEvidence: () => Promise<void>;
-  fetchAnalysis: () => Promise<void>;
   fetchProblems: () => Promise<void>;
   fetchOpportunities: () => Promise<void>;
   fetchDecisions: () => Promise<void>;
@@ -206,12 +262,30 @@ interface PmxStore {
   deleteProject: (projectId?: string) => Promise<boolean>;
 }
 
+const initialProjectId = (typeof localStorage !== "undefined" && localStorage.getItem(ACTIVE_PROJECT_KEY)) || "default";
+
 export const usePmxStore = create<PmxStore>((set, get) => ({
-  projectId: "default",
+  projectId: initialProjectId,
+  openTabIds: loadOpenTabs(),
+  closeWorkspaceTab: (id) => {
+    const tabs = get().openTabIds;
+    const next = tabs.filter((t) => t !== id);
+    saveOpenTabs(next);
+    set({ openTabIds: next });
+    if (get().projectId === id) {
+      // Closing the active tab: fall back to another open tab, or — if that
+      // was the last one — the same fresh, un-materialized workspace state
+      // the "Home" button puts you in.
+      if (next.length > 0) get().setProjectId(next[next.length - 1]);
+      else get().startFreshWorkspace();
+    }
+  },
+  workspaces: [],
+  workspacesLoading: false,
   inputs: [],
   understanding: null,
+  ideaPrd: null,
   evidence: [],
-  analysis: [],
   problems: [],
   opportunities: [],
   decisions: [],
@@ -226,7 +300,6 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     inputs: false,
     understanding: false,
     evidence: false,
-    analysis: false,
     problems: false,
     opportunities: false,
     decisions: false,
@@ -238,8 +311,89 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
   },
 
   setProjectId: (id) => {
+    localStorage.setItem(ACTIVE_PROJECT_KEY, id);
+    const tabs = get().openTabIds;
+    if (!tabs.includes(id)) {
+      const next = [...tabs, id];
+      saveOpenTabs(next);
+      set({ projectId: id, openTabIds: next });
+    } else {
+      set({ projectId: id });
+    }
+    get().fetchAll();
+  },
+
+  startFreshWorkspace: () => {
+    const id = crypto.randomUUID();
+    localStorage.setItem(ACTIVE_PROJECT_KEY, id);
     set({ projectId: id });
     get().fetchAll();
+  },
+
+  promoteToTab: (id) => {
+    const tabs = get().openTabIds;
+    if (!tabs.includes(id)) {
+      const next = [...tabs, id];
+      saveOpenTabs(next);
+      set({ openTabIds: next });
+    }
+    get().fetchWorkspaces();
+  },
+
+  fetchWorkspaces: async () => {
+    set({ workspacesLoading: true });
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects`, { headers });
+      const json = await res.json();
+      if (json.success) {
+        set({ workspaces: json.data });
+        // Drop any open tabs pointing at workspaces that no longer exist
+        // (e.g. deleted from another session), but never drop the last one.
+        const liveIds = new Set((json.data as PmxWorkspaceSummary[]).map((w) => w.projectId));
+        const tabs = get().openTabIds;
+        const pruned = tabs.filter((id) => liveIds.has(id) || id === get().projectId);
+        if (pruned.length && pruned.length !== tabs.length) {
+          saveOpenTabs(pruned);
+          set({ openTabIds: pruned });
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      set({ workspacesLoading: false });
+    }
+  },
+
+  createWorkspace: async (name) => {
+    const headers = await getPmxHeaders();
+    const res = await fetch(`${API_URL}/pmx/projects`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name }),
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.error || "Failed to create workspace");
+    await get().fetchWorkspaces();
+    return json.data.projectId as string;
+  },
+
+  renameWorkspace: async (projectId, name) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(projectId)}/rename`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ name }),
+      });
+      const json = await res.json();
+      if (!json.success) return false;
+      await get().fetchWorkspaces();
+      return true;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
   },
 
   fetchInputs: async () => {
@@ -270,6 +424,17 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     }
   },
 
+  fetchIdeaPrd: async () => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/idea/prd/latest?projectId=${get().projectId}`, { headers });
+      const json = await res.json();
+      set({ ideaPrd: json.success ? json.data : null });
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
   fetchEvidence: async () => {
     set((state) => ({ loading: { ...state.loading, evidence: true } }));
     try {
@@ -281,20 +446,6 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
       console.error(err);
     } finally {
       set((state) => ({ loading: { ...state.loading, evidence: false } }));
-    }
-  },
-
-  fetchAnalysis: async () => {
-    set((state) => ({ loading: { ...state.loading, analysis: true } }));
-    try {
-      const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/analysis?projectId=${get().projectId}`, { headers });
-      const json = await res.json();
-      if (json.success) set({ analysis: json.data });
-    } catch (err) {
-      console.error(err);
-    } finally {
-      set((state) => ({ loading: { ...state.loading, analysis: false } }));
     }
   },
 
@@ -400,8 +551,8 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     await Promise.all([
       get().fetchInputs(),
       get().fetchUnderstanding(),
+      get().fetchIdeaPrd(),
       get().fetchEvidence(),
-      get().fetchAnalysis(),
       get().fetchProblems(),
       get().fetchOpportunities(),
       get().fetchDecisions(),
@@ -447,8 +598,8 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
         set({
           inputs: [],
           understanding: null,
+          ideaPrd: null,
           evidence: [],
-          analysis: [],
           problems: [],
           opportunities: [],
           decisions: [],

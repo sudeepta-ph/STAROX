@@ -1,18 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, Settings, User, CreditCard,
   HelpCircle, FileText, BarChart3, Bell, Shield, LogOut,
   LogIn, ChevronDown, PanelLeftClose, PanelLeftOpen, Menu, X, Star, BookOpen, Plug,
-  Database, TrendingUp, Lightbulb, Sparkles, Award, Clock, ArrowLeft, ArrowRight
+  Database, TrendingUp, Lightbulb, Sparkles, Award, Clock, ArrowLeft, Layers
 } from "lucide-react";
 import { useAuthStore } from "@/lib/authStore";
 import { useClerk } from "@clerk/clerk-react";
 import AuthModal from "./AuthModal";
 import { useSidebarStore } from "@/lib/sidebarStore";
 import { usePmxStore } from "@/lib/pmxStore";
-import { useToast } from "@/components/ui/use-toast";
 
 const mainNav = [
   { name: "STAROX Intelligence",  icon: LayoutDashboard, path: "/starox-intelligence" },
@@ -24,6 +23,7 @@ const mainNav = [
 
 const pmxNav = [
   { name: "Overview",   icon: LayoutDashboard, path: "/pmx/overview" },
+  { name: "Workspaces", icon: Layers,          path: "/pmx/products" },
   { name: "Sources",    icon: Database,        path: "/pmx/sources" },
   { name: "AI EXPERIENCE Intelligence", icon: TrendingUp, path: "/pmx/analysis", glow: true },
   { name: "Insights",   icon: Sparkles,        path: "/pmx/insights" },
@@ -55,27 +55,45 @@ const Sidebar = () => {
   const location = useLocation();
   const { user } = useAuthStore();
   const { signOut } = useClerk();
-  const { collapsed, toggle } = useSidebarStore();
-  const { runPipeline, loading, selectedSourceIds, inputs } = usePmxStore();
-  const { toast } = useToast();
-  const [showConfirm, setShowConfirm] = useState(false);
+  const { collapsed, toggle, hiddenNavPaths } = useSidebarStore();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [startPulseMobile, setStartPulseMobile] = useState(false);
-  const [startPulseDesktop, setStartPulseDesktop] = useState(false);
   const isMobile = useIsMobile();
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
-  const triggerStartPulse = (setter: (v: boolean) => void) => {
-    setter(true);
-    window.setTimeout(() => setter(false), 420);
-  };
+  // Close the profile dropdown on an outside click.
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [userMenuOpen]);
 
   const isPmxRoute = location.pathname.startsWith("/pmx");
-  const currentNav = isPmxRoute ? pmxNav : mainNav;
 
-  const bottomNavMapped = bottomNav.map(item => {
-    return item;
+  // Insights / PRD / Execution stay hidden until the active workspace has
+  // actually earned them: Insights needs the existing-product pipeline
+  // (sources added, decisions generated); PRD and Execution unlock from
+  // either that same pipeline (a solution) or the idea-input one-shot flow
+  // (an idea PRD) — whichever path got there first.
+  const { inputs, decisions, solutions, ideaPrd } = usePmxStore();
+  const hasExistingProductPipeline = inputs.length > 0 || decisions.length > 0;
+  const hasPrd = hasExistingProductPipeline || solutions.length > 0 || !!ideaPrd;
+  const NAV_GATES: Record<string, boolean> = {
+    "/pmx/insights": hasExistingProductPipeline,
+    "/pmx/prd": hasPrd,
+    "/pmx/execution": hasPrd,
+  };
+
+  const currentNav = (isPmxRoute ? pmxNav : mainNav).filter((item) => {
+    if (hiddenNavPaths.includes(item.path)) return false;
+    if (isPmxRoute && item.path in NAV_GATES) return NAV_GATES[item.path];
+    return true;
   });
 
   const isActive = (path: string) => {
@@ -102,9 +120,9 @@ const Sidebar = () => {
     <>
       {isPmxRoute && (
         <Link to="/dashboard" onClick={onClick}
-          className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-xs font-semibold text-sky-400 hover:bg-sky-500/10 transition-all border border-sky-500/15 mb-2.5 mx-1">
-          <ArrowLeft className="h-3.5 w-3.5 shrink-0" />
-          <span>Back to Workspace</span>
+          className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-sidebar-foreground/50 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/80 transition-all">
+          <ArrowLeft className="h-4 w-4 shrink-0" />
+          <span>Back to Home</span>
         </Link>
       )}
       {currentNav.map((item) => {
@@ -189,54 +207,25 @@ const Sidebar = () => {
                 </nav>
 
                 <div className="border-t border-sidebar-border px-2 py-2 space-y-0.5">
-                  {isPmxRoute && (
-                    <div className="px-3 pb-2.5">
-                      <button
-                        onClick={() => {
-                          triggerStartPulse(setStartPulseMobile);
-                          setDrawerOpen(false);
-                          runPipeline();
-                        }}
-                        disabled={loading.pipeline}
-                        className="group relative w-full cursor-pointer border-none bg-transparent p-0 font-mono text-xs font-light uppercase outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        <span className="absolute left-0 top-0 h-full w-full translate-y-0.5 rounded-xl bg-black/25 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:translate-y-1 group-hover:duration-[250ms] group-active:translate-y-px dark:bg-black/40" />
-                        <span className="absolute left-0 top-0 h-full w-full rounded-xl bg-gradient-to-l from-[#e0f7fa] via-[#b3e5fc] to-[#81d4fa] dark:from-[#04283f] dark:via-[#063652] dark:to-[#0a4a6e]" />
-                        <div className={`relative flex w-full -translate-y-1 items-center justify-between gap-2 rounded-xl bg-gradient-to-r from-[#b3e5fc] via-[#4fc3f7] to-[#0288d1] px-3 py-2.5 text-xs font-bold text-[#0a3d62] brightness-105 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:-translate-y-1.5 group-hover:brightness-110 group-hover:duration-[250ms] group-active:-translate-y-0.5 dark:from-[#0369a1] dark:via-[#0ea5e9] dark:to-[#38bdf8] dark:text-white ${startPulseMobile ? "start-session-pulse" : ""}`}>
-                          {loading.pipeline ? (
-                            <>
-                              <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#0a3d62] border-t-transparent dark:border-white" />
-                              <span className="select-none">Running...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="select-none">Start session</span>
-                              <ArrowRight className="-mr-0.5 h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
-                            </>
-                          )}
-                        </div>
-                      </button>
-                    </div>
-                  )}
-                  {bottomNavMapped.map(item => (
-                    <Link key={item.path} to={item.path} onClick={() => setDrawerOpen(false)}
-                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all ${
-                        isActive(item.path)
-                          ? "bg-sidebar-accent text-sidebar-foreground"
-                          : "text-sidebar-foreground/42 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/72"
-                      }`}>
-                      <item.icon className="h-4 w-4 shrink-0" />
-                      {item.name}
-                    </Link>
-                  ))}
                   {user ? (
-                    <div className="pt-1 border-t border-sidebar-border mt-1">
+                    <div className="pt-1">
                       <div className="px-3 py-2">
                         <p className="text-xs font-medium text-sidebar-foreground truncate">{displayName}</p>
                         <p className="text-[10px] text-sidebar-foreground/35 truncate">{user.email}</p>
                       </div>
+                      {bottomNav.map(item => (
+                        <Link key={item.path} to={item.path} onClick={() => setDrawerOpen(false)}
+                          className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all ${
+                            isActive(item.path)
+                              ? "bg-sidebar-accent text-sidebar-foreground"
+                              : "text-sidebar-foreground/42 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/72"
+                          }`}>
+                          <item.icon className="h-4 w-4 shrink-0" />
+                          {item.name}
+                        </Link>
+                      ))}
                       <button onClick={async () => { setDrawerOpen(false); await signOut(); }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-sidebar-foreground/40 hover:text-sidebar-foreground/70 hover:bg-sidebar-accent/40 rounded-xl transition-colors">
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-sidebar-foreground/40 hover:text-sidebar-foreground/70 hover:bg-sidebar-accent/40 rounded-xl transition-colors mt-1 border-t border-sidebar-border pt-2">
                         <LogOut className="h-3.5 w-3.5" /> Sign out
                       </button>
                     </div>
@@ -288,10 +277,10 @@ const Sidebar = () => {
 
         <nav className="relative z-10 flex-1 space-y-0.5 overflow-y-auto overflow-x-hidden px-2 py-3">
           {isPmxRoute && (
-            <Link to="/dashboard" title={collapsed ? "Back to Workspace" : undefined}
-              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-sky-400 hover:bg-sky-500/10 transition-all border border-sky-500/15 mb-2.5 mx-1">
+            <Link to="/dashboard" title={collapsed ? "Back to Home" : undefined}
+              className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-sidebar-foreground/48 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/78 transition-all">
               <ArrowLeft className="h-4 w-4 shrink-0" />
-              {!collapsed && <span className="overflow-hidden whitespace-nowrap">Back to Workspace</span>}
+              {!collapsed && <span className="overflow-hidden whitespace-nowrap">Back to Home</span>}
             </Link>
           )}
           {currentNav.map((item) => {
@@ -329,66 +318,7 @@ const Sidebar = () => {
         </nav>
 
         <div className="relative z-10 shrink-0 space-y-0.5 border-t border-sidebar-border px-2 py-2">
-          {isPmxRoute && (
-            <div className="px-1.5 pb-2">
-              <button
-                onClick={() => {
-                  if (selectedSourceIds.length === 0) {
-                    toast({
-                      title: "No sources selected",
-                      description: "Select one or more sources to begin analysis.",
-                      variant: "destructive"
-                    });
-                    return;
-                  }
-                  triggerStartPulse(setStartPulseDesktop);
-                  setShowConfirm(true);
-                }}
-                disabled={loading.pipeline}
-                className="group relative w-full cursor-pointer border-none bg-transparent p-0 font-mono text-xs font-light uppercase outline-none disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="absolute left-0 top-0 h-full w-full translate-y-0.5 rounded-xl bg-black/25 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:translate-y-1 group-hover:duration-[250ms] group-active:translate-y-px dark:bg-black/40" />
-                <span className="absolute left-0 top-0 h-full w-full rounded-xl bg-gradient-to-l from-[#e0f7fa] via-[#b3e5fc] to-[#81d4fa] dark:from-[#04283f] dark:via-[#063652] dark:to-[#0a4a6e]" />
-                <div
-                  className={`relative flex w-full -translate-y-1 items-center gap-2 rounded-xl bg-gradient-to-r from-[#b3e5fc] via-[#4fc3f7] to-[#0288d1] px-3 py-2.5 text-xs font-bold text-[#0a3d62] brightness-105 transition duration-[600ms] ease-[cubic-bezier(0.3,0.7,0.4,1)] group-hover:-translate-y-1.5 group-hover:brightness-110 group-hover:duration-[250ms] group-active:-translate-y-0.5 dark:from-[#0369a1] dark:via-[#0ea5e9] dark:to-[#38bdf8] dark:text-white ${
-                    collapsed ? "justify-center" : "justify-between"
-                  } ${startPulseDesktop ? "start-session-pulse" : ""}`}
-                >
-                  {loading.pipeline ? (
-                    <>
-                      <div className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-[#0a3d62] border-t-transparent dark:border-white" />
-                      {!collapsed && <span className="select-none">Running...</span>}
-                    </>
-                  ) : collapsed ? (
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
-                  ) : (
-                    <>
-                      <span className="select-none">Start session</span>
-                      <ArrowRight className="-mr-0.5 h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-hover:translate-x-1" />
-                    </>
-                  )}
-                </div>
-              </button>
-            </div>
-          )}
-          {bottomNavMapped.map((item) => (
-            <Link key={item.path} to={item.path} title={collapsed ? item.name : undefined}
-              className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-all ${
-                isActive(item.path)
-                  ? "bg-sidebar-accent text-sidebar-foreground shadow-[inset_0_1px_0_hsl(var(--sidebar-foreground)/0.06),0_4px_12px_rgba(0,0,0,0.08)]"
-                  : "text-sidebar-foreground/42 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/72"
-              }`}>
-              <item.icon className="h-4 w-4 shrink-0" />
-              <AnimatePresence>
-                {!collapsed && (
-                  <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15 }}
-                    className="overflow-hidden whitespace-nowrap text-sm">{item.name}</motion.span>
-                )}
-              </AnimatePresence>
-            </Link>
-          ))}
-
-          <div className="relative pt-1">
+          <div className="relative pt-1" ref={userMenuRef}>
             {user ? (
               <>
                 <button onClick={() => setUserMenuOpen(o => !o)} title={collapsed ? displayName : undefined}
@@ -422,6 +352,14 @@ const Sidebar = () => {
                         </Link>
                       ))}
                       <div className="mt-1 border-t border-border/50 pt-1">
+                        {bottomNav.map(item => (
+                          <Link key={item.path} to={item.path} onClick={() => setUserMenuOpen(false)}
+                            className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                            <item.icon className="h-3.5 w-3.5" />{item.name}
+                          </Link>
+                        ))}
+                      </div>
+                      <div className="mt-1 border-t border-border/50 pt-1">
                         <button onClick={async () => { setUserMenuOpen(false); await signOut(); }}
                           className="flex w-full items-center gap-2 px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                           <LogOut className="h-3.5 w-3.5" />Sign out
@@ -449,90 +387,6 @@ const Sidebar = () => {
       </motion.aside>
 
       <AuthModal isOpen={authModalOpen} onClose={() => setAuthModalOpen(false)} />
-
-      {/* Pipeline Confirmation Modal */}
-      <AnimatePresence>
-        {showConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md bg-zinc-950 border border-zinc-900 rounded-2xl p-6 shadow-2xl relative"
-            >
-              <button
-                onClick={() => setShowConfirm(false)}
-                className="absolute top-4 right-4 p-1.5 rounded-lg text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
-              >
-                <X className="h-4 w-4" />
-              </button>
-
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-sky-400">
-                  <img src="/assets/images/strx.png" className="h-5 w-5 object-contain" alt="" />
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Running PMX Intelligence</h3>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs text-zinc-400 pb-2 border-b border-zinc-900">
-                    <span>Sources Selected:</span>
-                    <span className="font-bold text-white bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
-                      {selectedSourceIds.length}
-                    </span>
-                  </div>
-
-                  <div className="max-h-40 overflow-y-auto space-y-1.5 py-2 pr-1 scrollbar-thin">
-                    {inputs.filter((i: any) => selectedSourceIds.includes(i._id)).map((source: any) => (
-                      <div key={source._id} className="flex items-center gap-2 rounded-lg bg-zinc-900/40 border border-zinc-900 px-3 py-2">
-                        <Database className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
-                        <span className="text-xs text-zinc-300 truncate font-medium">{source.name}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-xl bg-sky-500/5 border border-sky-500/10 p-3.5 mt-2">
-                    <span className="text-[10px] uppercase font-bold text-sky-400 tracking-wider">Estimated Processing Time</span>
-                    <p className="text-xs text-zinc-300 font-semibold mt-0.5">~45 seconds</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => setShowConfirm(false)}
-                    className="flex-1 rounded-lg border border-zinc-800 hover:bg-zinc-900 py-2.5 text-xs font-semibold text-zinc-400 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={async () => {
-                      setShowConfirm(false);
-                      try {
-                        window.dispatchEvent(new CustomEvent("pmx-pipeline-started"));
-                        await runPipeline();
-                        window.dispatchEvent(new CustomEvent("pmx-pipeline-completed"));
-                        toast({
-                          title: "Analysis Complete",
-                          description: "Automated PMX pipeline run finished successfully."
-                        });
-                      } catch (err) {
-                        window.dispatchEvent(new CustomEvent("pmx-pipeline-failed"));
-                        toast({
-                          title: "Analysis Failed",
-                          description: "An error occurred during pipeline run.",
-                          variant: "destructive"
-                        });
-                      }
-                    }}
-                    className="flex-1 rounded-lg bg-sky-500 hover:bg-sky-400 py-2.5 text-xs font-bold text-black transition-colors"
-                  >
-                    Start Analysis
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </>
   );
 };
