@@ -1,11 +1,20 @@
-import { callDeepSeek, parseJsonResponse } from "./ai/deepseek";
+import { callDeepSeek, parseJsonResponse, withRecoveryRetry } from "./ai/deepseek";
+import { AI_MODEL } from "./ai/models";
 import crypto from "node:crypto";
+
+const MAX_TOKENS_UI_AUDIT = 3000;
 
 export interface UIIssue {
   id: string;
   title: string;
   severity: "critical" | "high" | "medium" | "low";
-  screen: string;
+  screen: string; // human-readable label, e.g. "Checkout page" — kept as-is
+  // 0-based index into the screenshots[] array actually sent for this call,
+  // matching the "Screenshot N" order in the prompt context. null when the
+  // model's value couldn't be trusted (missing/non-numeric/out of range with
+  // 2+ screenshots) or when there was nothing to reference (0 screenshots) —
+  // see resolveScreenshotIndex.
+  screenshotIndex: number | null;
   category: string;
   problem: string;
   change: string;
@@ -17,6 +26,12 @@ export interface UIAuditResult {
   overallScore: number;
   summary: string;
   issues: UIIssue[];
+  // Populated by the route (pmx.ts), not by runUIAudit itself — this stays
+  // scoped to the AI call. For URL-mode, this is the single server-captured
+  // full-page screenshot (see captureScreenshot in screenshot.ts); absent if
+  // capture failed or wasn't attempted. Same { dataUrl, label } shape the
+  // frontend already uses for its own uploaded screenshots.
+  screenshots?: Array<{ dataUrl: string; label: string }>;
 }
 
 // ── System prompt — strict UI-only scope ──────────────────────────────────────
@@ -52,6 +67,7 @@ Return ONLY this JSON:
       "title": "string",
       "severity": "critical|high|medium|low",
       "screen": "string",
+      "screenshotIndex": "number (always 0 — there is exactly one screenshot for this audit, a full-page capture of the live URL)",
       "category": "string",
       "problem": "string (1-2 sentences)",
       "change": "string (1-2 sentences)",
@@ -92,6 +108,7 @@ Return ONLY this JSON:
       "title": "string",
       "severity": "critical|high|medium|low",
       "screen": "string (name the specific screen/page this occurs on)",
+      "screenshotIndex": "number (0-based index of the screenshot this issue was found on, matching the order screenshots were listed above — 0 for the first screenshot, 1 for the second, etc.)",
       "category": "string",
       "problem": "string (1-2 sentences)",
       "change": "string (1-2 sentences)",
@@ -101,29 +118,48 @@ Return ONLY this JSON:
 }`;
 }
 
+// Validates the model's screenshotIndex against how many screenshots were
+// actually sent for this call — never trusts it blindly. With 0 screenshots
+// there's nothing to point to (null). With exactly 1, that screenshot is the
+// only possible answer, so it's unambiguous even if the model omitted or
+// botched the field. With 2+, an invalid/out-of-range value is genuinely
+// ambiguous — null rather than guessing which screen it meant.
+function resolveScreenshotIndex(raw: unknown, screenshotCount: number): number | null {
+  if (screenshotCount === 0) return null;
+  if (screenshotCount === 1) return 0;
+  const isValid = typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw < screenshotCount;
+  return isValid ? raw : null;
+}
+
 // ── Core runner ───────────────────────────────────────────────────────────────
 
 export async function runUIAudit(
   context: string,
-  mode: "initial" | "enhance" = "initial"
+  mode: "initial" | "enhance" = "initial",
+  screenshotCount: number = 0,
+  userId?: string,
+  projectId?: string
 ): Promise<UIAuditResult> {
   const prompt = mode === "enhance"
     ? buildEnhancePrompt(context)
     : buildInitialPrompt(context);
 
   try {
-    const raw    = await callDeepSeek(prompt, undefined, 3000, undefined, SYSTEM);
-    const parsed = parseJsonResponse(raw);
+    const parsed = await withRecoveryRetry(`uiAudit:${mode}`, MAX_TOKENS_UI_AUDIT, async (reportCompletionTokens) => {
+      const raw = await callDeepSeek(prompt, AI_MODEL, MAX_TOKENS_UI_AUDIT, undefined, SYSTEM, `uiAudit:${mode}`, (usage) => reportCompletionTokens(usage.completion_tokens), userId, projectId);
+      return parseJsonResponse(raw, `uiAudit:${mode}`, "issues");
+    });
 
     const issues: UIIssue[] = (parsed.issues || []).map((iss: any) => ({
-      id:          crypto.randomUUID(),
-      title:       iss.title       || "Untitled Issue",
-      severity:    iss.severity    || "medium",
-      screen:      iss.screen      || "Unknown",
-      category:    iss.category    || "Usability Friction",
-      problem:     iss.problem     || "",
-      change:      iss.change      || "",
-      improvement: iss.improvement || "",
+      id:              crypto.randomUUID(),
+      title:           iss.title       || "Untitled Issue",
+      severity:        iss.severity    || "medium",
+      screen:          iss.screen      || "Unknown",
+      screenshotIndex: resolveScreenshotIndex(iss.screenshotIndex, screenshotCount),
+      category:        iss.category    || "Usability Friction",
+      problem:         iss.problem     || "",
+      change:          iss.change      || "",
+      improvement:     iss.improvement || "",
     }));
 
     return {

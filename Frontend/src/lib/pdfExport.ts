@@ -3,6 +3,31 @@ import type { Starox2Output, PageScreenshot, Starox1Output, S1PageScreenshot } f
 import { checkAndConsume } from "./usageLimit";
 import { useAuthStore } from "./authStore";
 
+// ══════════════════════════════════════════════════════════════════════════════
+// PMX DEVELOPMENT PRD EXPORT — renders the live markdown DOM node to a
+// paginated PDF via jsPDF's html() plugin (bundles html2canvas internally).
+// Unlike the hand-drawn STAROX reports above, this content is an
+// AI-authored markdown document of arbitrary length/structure, so we
+// capture the already-rendered HTML rather than redrawing every element.
+// ══════════════════════════════════════════════════════════════════════════════
+export async function exportPrdPDF(el: HTMLElement, filename: string): Promise<void> {
+  const pdf = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const margin = 24;
+
+  await new Promise<void>((resolve, reject) => {
+    pdf.html(el, {
+      callback: (doc) => { doc.save(filename); resolve(); },
+      x: margin,
+      y: margin,
+      width: pageWidth - margin * 2,
+      windowWidth: el.scrollWidth || 800,
+      autoPaging: "text",
+      html2canvas: { scale: 0.55, useCORS: true, backgroundColor: "#0a0a0f" },
+    }).catch(reject);
+  });
+}
+
 // ── Shared palette ─────────────────────────────────────────────────────────────
 const PRIMARY  = [59, 130, 246]  as const;
 const ACCENT   = [168, 85, 247]  as const;

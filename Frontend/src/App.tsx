@@ -19,6 +19,7 @@ import Help from "@/pages/Help";
 import Notifications from "@/pages/Notifications";
 import Profile from "@/pages/Profile";
 import Privacy from "@/pages/Privacy";
+import Terms from "@/pages/Terms";
 import Teams from "@/pages/Teams";
 import TeamsEdits from "@/pages/TeamsEdits";
 import TeamsTeamX from "@/pages/TeamsTeamX";
@@ -37,19 +38,17 @@ import AdminMediaLibrary from "./pages/AdminMediaLibrary";
 import PmxLayout from "@/components/pmx/PmxLayout";
 import PmxOverview from "@/pages/pmx/PmxOverview";
 import PmxSources from "@/pages/pmx/PmxSources";
-import PmxEvidence from "@/pages/pmx/PmxEvidence";
 import PmxAnalysis from "@/pages/pmx/PmxAnalysis";
-import PmxProblems from "@/pages/pmx/PmxProblems";
-import PmxOpportunities from "@/pages/pmx/PmxOpportunities";
-import PmxDecisions from "@/pages/pmx/PmxDecisions";
-import PmxSolutions from "@/pages/pmx/PmxSolutions";
 import PmxInsights from "@/pages/pmx/PmxInsights";
 import PmxPrd from "@/pages/pmx/PmxPrd";
 import PmxExecution from "@/pages/pmx/PmxExecution";
 import PmxArtifacts from "@/pages/pmx/PmxArtifacts";
 import PmxHistory from "@/pages/pmx/PmxHistory";
 import PmxSettings from "@/pages/pmx/PmxSettings";
+import PmxProducts from "@/pages/pmx/PmxProducts";
 import PmxDocs from "@/pages/pmx/PmxDocs";
+import PmxJoin from "@/pages/pmx/PmxJoin";
+import PmxJoinCode from "@/pages/pmx/PmxJoinCode";
 
 const CLERK_PUBLISHABLE_KEY = (import.meta as any).env.VITE_CLERK_PUBLISHABLE_KEY;
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
@@ -58,10 +57,16 @@ if (!CLERK_PUBLISHABLE_KEY) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY in environment variables.");
 }
 
-// Helper component to sync Clerk Auth state and fetch role from Supabase DB
+// Helper component to sync Clerk Auth state and fetch role from the backend (MongoDB).
+// Rendered inside <BrowserRouter> so it can resume a pending workspace
+// invite (see PmxJoin.tsx) once sign-in completes — the invite-accept flow
+// stashes a token in sessionStorage before opening AuthModal, since every
+// existing AuthModal success path hard-navigates elsewhere (/dashboard, or
+// "/" for OAuth) with no "return to X" plumbing of its own.
 function ClerkAuthSync() {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser();
   const { setUser, setLoading } = useAuthStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!isLoaded) {
@@ -92,6 +97,16 @@ function ClerkAuthSync() {
           photoURL: clerkUser.imageUrl || null,
           role: userRole
         });
+
+        const pendingInviteToken = sessionStorage.getItem("pmx_pending_invite_token");
+        const pendingInviteCode = sessionStorage.getItem("pmx_pending_invite_code");
+        if (pendingInviteToken) {
+          sessionStorage.removeItem("pmx_pending_invite_token");
+          navigate(`/pmx/join/${pendingInviteToken}`);
+        } else if (pendingInviteCode) {
+          sessionStorage.removeItem("pmx_pending_invite_code");
+          navigate(`/pmx/join?code=${encodeURIComponent(pendingInviteCode)}`);
+        }
       } else {
         setUser(null);
       }
@@ -99,7 +114,7 @@ function ClerkAuthSync() {
     };
 
     syncUserSession();
-  }, [isLoaded, isSignedIn, clerkUser, setUser, setLoading]);
+  }, [isLoaded, isSignedIn, clerkUser, setUser, setLoading, navigate]);
 
   return null;
 }
@@ -131,7 +146,7 @@ function ProtectedRoute() {
       <div className="h-screen w-screen bg-background relative overflow-hidden flex items-center justify-center font-sans">
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_65%_at_5%_0%,rgba(90,189,255,0.06)_0%,transparent_50%)]" />
         <div className="text-center space-y-4 max-w-sm px-6 relative z-10">
-          <img src="/strx.png" alt="STAROX Logo" className="h-10 w-10 mx-auto object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
+          <img src="/assets/images/strx.png" alt="STAROX Logo" className="h-10 w-10 mx-auto object-contain drop-shadow-[0_0_8px_rgba(102,214,255,0.5)]" />
           <h2 className="text-lg font-bold text-white font-display">Authentication Required</h2>
           <p className="text-xs text-muted-foreground leading-relaxed">
             Please sign in to access the STAROX Intelligence workspace and strategic tools.
@@ -173,19 +188,24 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl="/">
-      <ClerkAuthSync />
       <ThemeProvider attribute="class" defaultTheme="dark" storageKey="starox-theme">
         <BrowserRouter>
+          <ClerkAuthSync />
           <Routes>
             {/* Public Callback */}
             <Route
               path="/sso-callback"
               element={<AuthenticateWithRedirectCallback signInForceRedirectUrl="/" signUpForceRedirectUrl="/" />}
             />
-            
+
             {/* Public Blog Routes */}
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
+
+            {/* Public PMX workspace invite — code entry is the current mechanism;
+                the token route stays live only to resolve already-distributed links */}
+            <Route path="/pmx/join" element={<PmxJoinCode />} />
+            <Route path="/pmx/join/:token" element={<PmxJoin />} />
 
             {/* Public Pages */}
             <Route path="/" element={<Navigate to="/starox-intelligence" replace />} />
@@ -196,27 +216,30 @@ export default function App() {
             <Route path="/products/build" element={<Navigate to="/build" replace />} />
             <Route path="/products/automation" element={<Navigate to="/automation" replace />} />
             <Route path="/products/teams" element={<Navigate to="/teams" replace />} />
-            <Route path="/solutions" element={<ComingSoon title="STAROX Solutions" description="Tailored workspaces and intelligence pipelines for founders, product managers, designers, marketing, sales, HR, and operations. Launching soon." />} />
             <Route path="/solutions/:segment" element={<ComingSoon title="STAROX Solutions" description="Tailored workspace and intelligence pipelines for your specific team or use case. Launching soon." />} />
             <Route path="/starox-intelligence/community" element={<ComingSoon title="STAROX Community" description="A space for builders, founders, and teams using STAROX to connect, share, and grow together. Early access coming soon." />} />
             <Route path="/build" element={<ComingSoon title="STAROX BUILD" description="Websites, apps & SaaS development powered by AI. Full-stack builds, design-to-deployment pipelines, and production-ready products — launching soon." />} />
             <Route path="/automation" element={<ComingSoon title="STAROX AUTOMATION" description="Business & AI automations that eliminate repetitive work. Connect your tools, trigger intelligent workflows, and scale without the overhead — coming soon." />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/help" element={<Help />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
 
             {/* Protected Workspace Routes */}
             <Route element={<ProtectedRoute />}>
               <Route path="/teams" element={<Teams />} />
-              <Route path="/edits" element={<Navigate to="/teams" replace />} />
+              <Route path="/teams/edits" element={<TeamsEdits />} />
+              <Route path="/teams/teamx" element={<TeamsTeamX />} />
+              <Route path="/edits" element={<Navigate to="/teams/edits" replace />} />
               <Route path="/product-intelligence" element={<Index />} />
               <Route path="/agent/:agentId" element={<AgentPage />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/analytics" element={<Analytics />} />
+              <Route path="/connectors" element={<Connectors />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/profile" element={<Profile />} />
-              <Route path="/privacy" element={<Privacy />} />
 
               {/* Protected Admin Blog Routes */}
               <Route path="/admin/blog" element={<AdminRoute><AdminBlogDashboard /></AdminRoute>} />
@@ -228,6 +251,7 @@ export default function App() {
               <Route path="/pmx" element={<PmxLayout />}>
                 <Route index element={<Navigate to="/pmx/overview" replace />} />
                 <Route path="overview" element={<PmxOverview />} />
+                <Route path="products" element={<PmxProducts />} />
                 <Route path="sources" element={<PmxSources />} />
                 <Route path="analysis" element={<PmxAnalysis />} />
                 <Route path="insights" element={<PmxInsights />} />

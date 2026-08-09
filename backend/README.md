@@ -5,7 +5,7 @@ Production-ready Node.js + Express backend for STAROX AI workspace.
 ## Architecture
 
 - **Framework**: Express.js (TypeScript)
-- **Database**: PostgreSQL (via Supabase)
+- **Database**: MongoDB (via Mongoose)
 - **Security**: Helmet, CORS middleware
 - **Credits System**: Plan-based tier (Free/Starter/Pro)
 - **AI Integration**: Multi-provider routing (OpenAI/Claude/Gemini)
@@ -17,7 +17,7 @@ backend/
 ├── src/
 │   ├── index.ts              # Express server entrypoint
 │   ├── config/env.ts         # Environment validation
-│   ├── database/supabase.ts  # DB client
+│   ├── config/database.ts    # DB client (Mongoose/MongoDB)
 │   ├── types.ts              # TypeScript interfaces
 │   ├── middleware/           # Express middleware
 │   ├── services/             # Business logic
@@ -27,8 +27,7 @@ backend/
 │   └── api/routes/           # API endpoints
 │       ├── health.ts         # Health check
 │       └── cdx.ts            # CDX generation routes
-└── migrations/
-    └── 001_init_starox.sql   # Database schema
+└── models/                   # Mongoose schemas
 ```
 
 ## Quick Start (Local Development)
@@ -36,19 +35,16 @@ backend/
 ```bash
 # 1. Setup environment
 cp .env.example .env
-# Fill in SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+# Fill in MONGODB_URI, CLOUDINARY_*, DEEPSEEK_API_KEY, CLERK_SECRET_KEY
 
 # 2. Install dependencies
 npm install
 
-# 3. Create database tables (run in Supabase SQL editor)
-cat migrations/001_init_starox.sql
-
-# 4. Start dev server
+# 3. Start dev server
 npm run dev
 # Server runs on port 8080
 
-# 5. Test health endpoint
+# 4. Test health endpoint
 curl http://localhost:8080/health
 ```
 
@@ -98,40 +94,7 @@ Error on insufficient credits: `HTTP 402 Payment Required`
 
 ## Database Schema
 
-Auto-migrates on first request. Schema includes:
-- `user_credits`: Tracks per-user credit balance and plan tier
-- `generation_audit`: Immutable log of all generations (cost tracking, compliance)
-
-## Deploy to Railway
-
-### 1. Connect GitHub repo to Railway
-https://railway.app/new
-
-### 2. Set environment variables
-```
-PORT=8080
-NODE_ENV=production
-FRONTEND_ORIGIN=https://yourfrontenddomain.vercel.app
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-GOOGLE_API_KEY=...
-```
-
-### 3. Configure build & start
-- Build: `npm run build`
-- Start: `npm start`
-- Port: Detected from `PORT` env var (8080)
-
-### 4. Run migrations
-In Supabase, paste `migrations/001_init_starox.sql` into SQL editor and execute.
-
-### 5. Update frontend API base
-In frontend `.env`:
-```
-VITE_API_URL=https://yourbackendname.railway.app/api
-```
+Collections are defined by the Mongoose models in `src/models/` (User, Blog, Media, Pmx, Placeholders) and created automatically on first write — no manual migration step.
 
 ## Deploy to Render
 
@@ -144,12 +107,19 @@ https://dashboard.render.com/
 - Start: `npm start`
 
 ### 3. Environment variables
-Same as Railway setup above.
+```
+PORT=8080
+NODE_ENV=production
+FRONTEND_ORIGIN=https://yourfrontenddomain.vercel.app
+MONGODB_URI=your_mongodb_atlas_uri
+CLERK_SECRET_KEY=sk_live_...
+CLOUDINARY_CLOUD_NAME=...
+CLOUDINARY_API_KEY=...
+CLOUDINARY_API_SECRET=...
+DEEPSEEK_API_KEY=...
+```
 
-### 4. Run migrations
-Same as Railway.
-
-### 5. Update frontend API base
+### 4. Update frontend API base
 ```
 VITE_API_URL=https://yourservicename.onrender.com/api
 ```
@@ -176,15 +146,6 @@ npm run typecheck # Validate TypeScript
 npm run build     # Compile to dist/
 npm run lint      # ESLint (optional)
 ```
-
-## Database Migrations
-
-Migrations stored in `backend/migrations/` directory.
-
-To add a new migration:
-1. Create `002_next_feature.sql` in `backend/migrations/`
-2. Run in Supabase SQL editor
-3. Commit to version control
 
 ## Next Steps
 

@@ -23,7 +23,7 @@ const capabilityCards = [
   {
     icon: Film,
     title: "Edits & Content",
-    description: "AI-assisted video, content, and media edits — fast iteration for marketing and creators.",
+    description: "AI-generated video, AI-assisted edits, and content production — fast iteration for marketing and creators.",
     href: "/teams/edits",
     accentLight: "#1a73e8",
     accentDark: "#60a5fa",
@@ -33,7 +33,7 @@ const capabilityCards = [
   {
     icon: Users,
     title: "Team Delivery",
-    description: "End-to-end project execution: full projects, MVPs, RSVPs, and managed delivery.",
+    description: "The tech team for any idea — TeamX builds the full ecosystem around it, from prototype to production.",
     href: "/teams/teamx",
     accentLight: "#d93025",
     accentDark: "#f87171",
@@ -114,7 +114,7 @@ export default function Teams() {
               border border-primary/20 bg-primary/8 px-3.5 py-1.5
               dark:border-white/[0.09] dark:bg-white/[0.04]"
           >
-            <img src="/strx.png" alt="" aria-hidden="true" className="h-3.5 w-3.5 object-contain opacity-70" />
+            <img src="/assets/images/strx.png" alt="" aria-hidden="true" className="h-3.5 w-3.5 object-contain opacity-70" />
             <span className="text-[10px] font-semibold uppercase tracking-[0.3em] text-primary dark:text-white/45">
               Starox Teams
             </span>
@@ -130,7 +130,7 @@ export default function Teams() {
           >
             Teams{" "}
             <motion.img
-              src="/strx.png"
+              src="/assets/images/strx.png"
               alt=""
               aria-hidden="true"
               className="inline-block align-middle"

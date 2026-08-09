@@ -480,6 +480,8 @@ Build (new features), Improve (existing logic), Optimize (performance/UX), Remov
 
 Every recommendation must clearly document: Reasoning, Trade-offs, ROI, Confidence, and Alternative options.
 
+Return the 4-8 highest-priority decisions only — do not create one decision per problem or opportunity; consolidate related ones. Keep each field concise (1-2 sentences).
+
 Problems:
 ${problemsStr}
 
@@ -532,6 +534,171 @@ Return exactly this JSON schema (and nothing else):
   "securityNotes": "string (RBAC, sanitization rules, rate-limiting in Markdown)",
   "uxImprovements": "string (wireframe description, flow improvements in Markdown)",
   "edgeCases": "string (handling network disconnects, invalid payloads, timeouts)"
+}`;
+}
+
+// ── PMX: Solution Studio combine prompt ───────────────────────────────────────
+// Merges N approved blueprints into one cohesive document — used when the
+// user picks several Solution Studio tabs and asks for a unified PRD instead
+// of shipping them as separate, possibly-overlapping documents.
+export function getCombineSolutionsPrompt(blueprints: Array<{ title: string; prd: string; techSpecs: string }>): string {
+  const blocks = blueprints
+    .map((b, i) => `### Blueprint ${i + 1}: ${b.title}\n\nPRD:\n${b.prd}\n\nTech Specs:\n${b.techSpecs || "(none)"}`)
+    .join("\n\n---\n\n");
+
+  return `Merge the following ${blueprints.length} approved product blueprints into ONE unified, cohesive Product Requirement Document — the way a PM would combine several related feature specs into a single release plan, not just concatenate them.
+
+${blocks}
+
+Rules:
+1. De-duplicate overlapping goals, user stories, and technical concerns instead of repeating them per blueprint.
+2. Preserve every distinct requirement, acceptance criterion, and technical detail from every blueprint — nothing gets dropped, only reorganized and de-duplicated.
+3. Organize the merged PRD so a reader can still tell which original feature area each part serves (e.g. subsections or clear headings per feature), while framing the whole as one initiative.
+4. Keep all descriptions concise (1-2 sentences per field maximum where possible) to fit within the token limit.
+
+Return exactly this JSON schema (and nothing else):
+{
+  "title": "string (a single title covering the combined scope)",
+  "prd": "string (the unified Product Requirement Document in Markdown)",
+  "epic": "string (High-level epic description & milestones covering all merged blueprints, in Markdown)",
+  "userStories": [
+    {
+      "story": "string (As a user... I want... So that...)",
+      "acceptanceCriteria": "string (Given... When... Then... in Markdown)"
+    }
+  ],
+  "techSpecs": "string (unified Technical Architecture covering all merged blueprints, in Markdown)",
+  "apiContracts": "string (merged API request/response paths in Markdown)",
+  "databaseChanges": "string (merged schema/migration plans in Markdown)",
+  "securityNotes": "string (merged RBAC, sanitization, rate-limiting notes in Markdown)",
+  "uxImprovements": "string (merged wireframe/flow notes in Markdown)",
+  "edgeCases": "string (merged edge case handling notes in Markdown)"
+}`;
+}
+
+// ── PMX: Development PRD pipeline (backend/src/services/pmxIdeaPrd.ts) ───────
+// The whole PRD is ONE markdown document (headings, tables, checklists,
+// code fences, mermaid diagrams) so it can render as a living engineering
+// spec and be edited in place by the AI prompt bar. One call produces the
+// full document in one pass using the exact required "## Section" headings
+// (critical: the frontend splits on these to drive per-section copy), kept
+// dense and implementation-focused — no business theory, no filler.
+
+const MARKDOWN_RULES = `Formatting rules: use "## Section Title" for each top-level section, exactly as named below — no other top-level headings. Use tables for structured data (fields, endpoints, comparisons). Use "- [ ]" checklists for task lists. Use fenced code blocks with a language tag for schemas/payloads/commands. Use "> **Note:**" blockquotes as callouts for risks or assumptions. Use a fenced \`\`\`mermaid code block for any diagram (architecture, ERD, or flow) — valid mermaid syntax only. Be dense and implementation-focused: no business theory, no filler, no repeated context between sections.`;
+
+// One-shot Idea→PRD generation — replaces the old 5-call discovery →
+// product spec → engineering spec → delivery plan → coding prompt chain
+// with a single call that produces the complete document in one pass.
+export function getIdeaOneShotPrompt(idea: string): string {
+  return `A developer submitted this product idea for a Development PRD — a spec for building the product, not a business plan. It may be incomplete — fill reasonable gaps yourself and list every assumption you made.
+
+Idea: "${idea}"
+
+Produce the complete PRD in one pass, covering: an overview of what it is and why now, the problem and its solution, target users, core features, user stories, a tech stack recommendation, and MVP scope. Also work out the concrete page/screen structure the MVP needs and how they're laid out/navigated.
+
+${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else). "markdown" is listed first deliberately — write it first, before the other fields — so that if you run out of room, the PRD content itself is what's already complete rather than the metadata around it:
+{
+  "markdown": "string — markdown body containing exactly these sections in order: '## Overview' (2-3 sentences: what it is, who it's for, why now), '## Problem & Solution' (the concrete problem, who has it, current workaround, and how this product solves it), '## Target Users' (a short table: user type | primary use case | frequency), '## Core Features' (a table per feature: Feature | Description | Priority (P0/P1/P2) | Key Acceptance Criteria — 6-10 features covering the full MVP scope), '## User Stories' (5-10 stories as 'As a [user], I want [goal], so that [benefit]', each with one-line acceptance criteria), '## Tech Stack' (2-3 sentence rationale, then a \`\`\`mermaid graph TD diagram showing frontend/backend/database/external services and data flow), '## MVP Scope' (what ships in v1 vs what's explicitly deferred, plus a '- [ ]' checklist of the concrete build tasks to reach it)",
+  "productName": "string — short product name",
+  "assumptions": ["string — one short sentence per gap you filled, 3-5 items max — keep each brief regardless of field order"],
+  "stack": {
+    "frontend": "string — e.g. React, Next.js, Vue",
+    "backend": "string — e.g. Node.js/Express, NestJS, FastAPI",
+    "database": "string — e.g. PostgreSQL, MongoDB, Supabase",
+    "cloud": "string — e.g. Vercel + Railway, AWS, GCP",
+    "authProvider": "string — e.g. Clerk, Auth0, Supabase Auth",
+    "aiProvider": "string — e.g. OpenAI, Anthropic, none",
+    "architecture": "string — Monolith | Modular Monolith | Microservices | Serverless"
+  },
+  "pages": [
+    { "name": "string — page/screen name, e.g. 'Dashboard'", "purpose": "string — one short sentence on what it's for and its key contents" }
+  ],
+  "layout": "string — 2-4 sentences on overall navigation/layout structure: shell (sidebar/topbar/tabs), how the pages above connect, and any responsive notes"
+}
+Pick the stack that best fits THIS idea — don't default to the same stack every time. List 5-9 pages covering the full MVP, ordered the way a user would encounter them.`;
+}
+
+// ── PMX: Development PRD refinement (AI prompt bar / theme controls) ─────────
+export function getIdeaRefinePrompt(currentMarkdown: string, stack: Record<string, string | undefined>, instruction: string): string {
+  return `You are editing an existing Development PRD in place, the way Cursor or Claude Canvas apply an edit to a live document — not regenerating it from scratch.
+
+Current stack: ${JSON.stringify(stack)}
+
+Current PRD (markdown, section headings are "## Title"):
+${currentMarkdown}
+
+Requested change: "${instruction}"
+
+Rules:
+1. Preserve every section and every sentence that isn't affected by this change, verbatim.
+2. Only rewrite the specific sections this change actually touches (e.g. a stack swap mainly touches Tech Stack, and often Core Features or MVP Scope if it changes what's feasible — but not Problem & Solution or Target Users).
+3. Keep the same "## Section Title" headings, in the same order, covering the full 7-section structure (Overview, Problem & Solution, Target Users, Core Features, User Stories, Tech Stack, MVP Scope).
+4. If the change implies a new stack choice, update the "stack" object to match.
+5. ${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "markdown": "string — the FULL updated PRD, all 7 sections, unaffected ones copied through unchanged",
+  "stack": { "frontend": "string", "backend": "string", "database": "string", "cloud": "string", "authProvider": "string", "aiProvider": "string", "architecture": "string" },
+  "changeSummary": "string — one sentence describing what actually changed"
+}`;
+}
+
+// ── PMX: Solution Studio PRD refine (backend/src/services/pmxAi.ts) ──────────
+// Same "edit in place" contract as getIdeaRefinePrompt, but for a Solution's
+// `prd` field, which has no fixed section structure to preserve.
+export function getSolutionRefinePrompt(currentMarkdown: string, instruction: string): string {
+  return `You are editing an existing Product Requirements Document in place, the way Cursor or Claude Canvas apply an edit to a live document — not regenerating it from scratch.
+
+Current PRD (markdown):
+${currentMarkdown}
+
+Requested change: "${instruction}"
+
+Rules:
+1. Preserve every section and every sentence that isn't affected by this change, verbatim.
+2. Only rewrite the specific parts this change actually touches.
+3. Keep the existing heading structure and ordering.
+4. ${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "markdown": "string — the FULL updated PRD, unaffected sections copied through unchanged",
+  "changeSummary": "string — one sentence describing what actually changed"
+}`;
+}
+
+// ── PMX: Artifact compilation prompt ──────────────────────────────────────────
+// Synthesizes one cohesive exportable document from the whole workspace
+// (PRD/blueprints, evidence, problems, opportunities, decisions, connected
+// sources, UI analysis, sprint tasks) — not a template that just echoes
+// whichever fields happen to already be loaded client-side. `context` is the
+// pre-assembled raw dump of everything currently available for the project;
+// the model's job is to read it and produce the requested document type.
+const ARTIFACT_TYPE_BRIEF: Record<string, string> = {
+  prd: "a Product Requirements Document: overview, problem & solution, target users, core features (prioritized), user stories, and scope (in vs. out for this release)",
+  technical_spec: "a Technical Architecture Specification: system design summary, stack/architecture rationale, API structure, data model / schema changes, security notes, and edge cases",
+  sprint_plan: "a Sprint Execution Plan: tasks grouped by sprint/category (frontend, backend, infra, testing, deployment), with priority, estimate, and assignee where known",
+  roadmap: "a Strategic Product Roadmap: value proposition, target personas, phased milestones (now / next / later), and the key risks or bets each phase depends on",
+};
+
+export function getCompileArtifactPrompt(docType: string, title: string, context: string): string {
+  const brief = ARTIFACT_TYPE_BRIEF[docType] || ARTIFACT_TYPE_BRIEF.prd;
+  return `Compile ${brief} titled "${title}", synthesized from everything gathered on this product so far.
+
+Source material (PRD/blueprints, evidence, problems, opportunities, decisions, connected sources, UI analysis, sprint tasks — not all sections will be present):
+${context}
+
+Rules:
+1. Synthesize, don't just concatenate — pull the material that's actually relevant to this document type and organize it into one cohesive document, not a dump of every input section back-to-back.
+2. Ground claims in the source material above; if something relevant is missing, note the gap briefly rather than inventing specifics.
+3. ${MARKDOWN_RULES}
+
+Return exactly this JSON schema (and nothing else):
+{
+  "content": "string — the full compiled document in Markdown, using '## Section Title' headings"
 }`;
 }
 

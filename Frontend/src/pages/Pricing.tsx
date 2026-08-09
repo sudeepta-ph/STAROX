@@ -26,7 +26,7 @@ const HERO_STYLE: CSSProperties = {
   ["--hero-grid-line" as string]: "204 46% 62%",
   ["--primary" as string]: "204 78% 57%",
   ["--ring" as string]: "204 78% 57%",
-  ["--hero-star-image" as string]: "url('/hero-star-core.svg')",
+  ["--hero-star-image" as string]: "url('/assets/images/hero-star-core.svg')",
 };
 
 const smoothEase = [0.22, 1, 0.36, 1] as const;

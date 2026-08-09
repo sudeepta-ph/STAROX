@@ -64,7 +64,7 @@ export default function ComingSoon({ title, description }: ComingSoonProps) {
                 />
                 <div className="absolute inset-10 rounded-full bg-primary/10 blur-2xl" />
                 <motion.img
-                  src="/strx.png"
+                  src="/assets/images/strx.png"
                   alt="STAROX"
                   draggable={false}
                   className="relative z-10 h-14 w-14 object-contain drop-shadow-[0_0_28px_rgba(56,189,248,0.85)] sm:h-16 sm:w-16 lg:h-20 lg:w-20"

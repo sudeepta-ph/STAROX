@@ -3,47 +3,16 @@ import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Sparkles, AlertTriangle, Lightbulb, CheckSquare, FileText,
-  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, ArrowRight,
-  MessageSquare, BarChart3, Cpu, TrendingUp, Users, DollarSign,
-  Search, Filter, Zap, Circle, CheckCircle2, X
+  Sparkles, AlertTriangle, FileText, ChevronDown, ChevronUp,
+  ThumbsUp, ThumbsDown, ArrowRight, MessageSquare, TrendingUp,
+  Cpu, DollarSign, Search, CheckCircle2, Circle, Loader2, BarChart3,
+  Layers, Users, X
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
+import { ToastAction } from "@/components/ui/toast";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
-
-// ── Confidence ring ────────────────────────────────────────────────
-function ConfidenceRing({ value }: { value: number }) {
-  const r = 16, circ = 2 * Math.PI * r;
-  const fill = circ - (value / 100) * circ;
-  const color = value >= 80 ? "#22c55e" : value >= 60 ? "#eab308" : "#ef4444";
-  return (
-    <svg width="40" height="40" viewBox="0 0 40 40" className="shrink-0">
-      <circle cx="20" cy="20" r={r} fill="none" stroke="currentColor" strokeWidth="3" className="text-border/50" />
-      <circle cx="20" cy="20" r={r} fill="none" stroke={color} strokeWidth="3"
-        strokeDasharray={circ} strokeDashoffset={fill} strokeLinecap="round"
-        transform="rotate(-90 20 20)" />
-      <text x="20" y="24" textAnchor="middle" fontSize="9" fontWeight="700" fill={color}>{value}%</text>
-    </svg>
-  );
-}
-
-// ── Evidence pill ─────────────────────────────────────────────────
-function EvidencePill({ icon: Icon, label, color }: { icon: any; label: string; color: string }) {
-  return (
-    <span className={`flex items-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded-full border ${color}`}>
-      <Icon className="h-2.5 w-2.5" />{label}
-    </span>
-  );
-}
-
-// ── Step badge ────────────────────────────────────────────────────
-const STEPS = [
-  { id: "evidence",    label: "Evidence",    color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20" },
-  { id: "problem",     label: "Problem",     color: "text-red-400",    bg: "bg-red-500/10",    border: "border-red-500/20" },
-  { id: "opportunity", label: "Opportunity", color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/20" },
-  { id: "decision",    label: "Recommendation", color: "text-sky-400", bg: "bg-sky-500/10",    border: "border-sky-500/20" },
-];
 
 type ActiveFilter = "all" | "pending" | "approved" | "rejected";
 
@@ -52,12 +21,14 @@ export default function PmxInsights() {
   const { evidence, problems, opportunities, decisions, fetchDecisions, fetchSolutions } = usePmxStore();
   const { toast } = useToast();
 
-  const [expandedId, setExpandedId]     = useState<string | null>(null);
+  const [expandedIds, setExpandedIds]   = useState<Set<string>>(new Set());
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("all");
   const [searchQuery, setSearchQuery]   = useState("");
   const [updatingId, setUpdatingId]     = useState<string | null>(null);
+  const [selectedIds, setSelectedIds]   = useState<string[]>([]);
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
-  // For each decision, find its linked opportunity and problems
+  // Link decisions to corresponding opportunities, problems, and evidence
   const getLinkedOpportunity = (dec: any) =>
     opportunities.find(o => dec.title.toLowerCase().includes(o.title.toLowerCase().slice(0, 20))) || opportunities[0];
 
@@ -67,10 +38,27 @@ export default function PmxInsights() {
   const getLinkedEvidence = (dec: any) =>
     evidence.slice(0, 3);
 
+  const toggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllExpanded = () => {
+    if (expandedIds.size === filtered.length) {
+      setExpandedIds(new Set());
+    } else {
+      setExpandedIds(new Set(filtered.map(d => d._id)));
+    }
+  };
+
   const filtered = decisions.filter(d => {
     const matchStatus = activeFilter === "all" || d.status === activeFilter;
     const matchSearch = d.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.reasoning.toLowerCase().includes(searchQuery.toLowerCase());
+      d.reasoning.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (d.category && d.category.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchStatus && matchSearch;
   });
 
@@ -83,16 +71,20 @@ export default function PmxInsights() {
 
   const handleApprove = async (id: string, title: string) => {
     setUpdatingId(id);
-    toast({ title: "Approving...", description: `Generating PRD for "${title}"` });
+    toast({ title: "Approving...", description: `Generating PRD blueprint for "${title}"` });
     try {
       const headers = await getPmxHeaders();
       const res = await fetch(`${API_URL}/pmx/decisions/${id}/status`, { method: "PUT", headers, body: JSON.stringify({ status: "approved" }) });
       const json = await res.json();
       if (json.success) {
-        toast({ title: "Approved — PRD generating", description: "Blueprint queued in PRD workspace." });
+        toast({
+          title: "Approved — PRD generating",
+          description: "Blueprint queued in PRD workspace.",
+          action: <ToastAction altText="Open PRD" onClick={() => navigate("/pmx/prd")}>Open PRD</ToastAction>,
+        });
         fetchDecisions(); fetchSolutions();
       }
-    } catch { toast({ variant: "destructive", title: "Error" }); }
+    } catch { toast({ variant: "destructive", title: "Error approving recommendation" }); }
     finally { setUpdatingId(null); }
   };
 
@@ -102,313 +94,527 @@ export default function PmxInsights() {
       const headers = await getPmxHeaders();
       const res = await fetch(`${API_URL}/pmx/decisions/${id}/status`, { method: "PUT", headers, body: JSON.stringify({ status: "rejected" }) });
       const json = await res.json();
-      if (json.success) { toast({ title: "Rejected" }); fetchDecisions(); }
-    } catch { toast({ variant: "destructive", title: "Error" }); }
+      if (json.success) { toast({ title: "Recommendation marked as rejected" }); fetchDecisions(); }
+    } catch { toast({ variant: "destructive", title: "Error rejecting recommendation" }); }
     finally { setUpdatingId(null); }
   };
 
   const handleGeneratePrd = (id: string, title: string) => {
-    toast({ title: "Redirecting to PRD workspace..." });
+    toast({ title: "Opening PRD workspace..." });
     navigate("/pmx/prd");
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const updateDecisionStatus = async (id: string, status: "approved" | "rejected") => {
+    const headers = await getPmxHeaders();
+    const res = await fetch(`${API_URL}/pmx/decisions/${id}/status`, { method: "PUT", headers, body: JSON.stringify({ status }) });
+    return res.json();
+  };
+
+  const handleBulkApprove = async () => {
+    const ids = selectedIds.filter(id => decisions.find(d => d._id === id)?.status === "pending");
+    if (ids.length === 0) return;
+    setBulkProcessing(true);
+    toast({ title: `Approving ${ids.length} recommendation${ids.length === 1 ? "" : "s"}...`, description: "Generating PRD blueprints — this can take a moment." });
+    try {
+      for (const id of ids) await updateDecisionStatus(id, "approved");
+      toast({
+        title: "Approved",
+        description: `${ids.length} recommendation${ids.length === 1 ? "" : "s"} approved — blueprints queued in PRD workspace.`,
+        action: <ToastAction altText="Open PRD" onClick={() => navigate("/pmx/prd")}>Open PRD</ToastAction>,
+      });
+    } catch {
+      toast({ variant: "destructive", title: "Some approvals failed", description: "Refresh to see which ones went through." });
+    } finally {
+      setSelectedIds([]);
+      setBulkProcessing(false);
+      fetchDecisions(); fetchSolutions();
+    }
+  };
+
+  const handleBulkReject = async () => {
+    const ids = selectedIds.filter(id => decisions.find(d => d._id === id)?.status === "pending");
+    if (ids.length === 0) return;
+    setBulkProcessing(true);
+    try {
+      await Promise.all(ids.map(id => updateDecisionStatus(id, "rejected")));
+      toast({ title: `Rejected ${ids.length} recommendation${ids.length === 1 ? "" : "s"}` });
+    } catch {
+      toast({ variant: "destructive", title: "Some rejections failed", description: "Refresh to see which ones went through." });
+    } finally {
+      setSelectedIds([]);
+      setBulkProcessing(false);
+      fetchDecisions();
+    }
+  };
+
   const isEmpty = decisions.length === 0;
+  const pendingFiltered = filtered.filter(d => d.status === "pending");
+
+  // Summary generation from actual data
+  const topPending = decisions.find(d => d.status === "pending") || decisions[0];
+  const uniqueCategories = [...new Set(decisions.map(d => d.category).filter(Boolean))];
 
   return (
-    <div className="p-6 max-w-4xl mx-auto space-y-6 pb-24">
+    <div className="p-6 md:p-8 max-w-4xl mx-auto space-y-8 pb-28">
 
-      {/* ── PAGE HEADER ─────────────────────────────────────────── */}
-      <div className="space-y-1">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-bold text-foreground">AI Product Insights</h1>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          What should we build, fix, or improve — and why?
-        </p>
-      </div>
-
-      {/* ── REASONING FLOW HEADER BAR ────────────────────────────── */}
-      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-1">
-        {STEPS.map((step, i) => (
-          <div key={step.id} className="flex items-center gap-2 shrink-0">
-            <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border ${step.bg} ${step.border} ${step.color}`}>
-              {step.label}
-            </span>
-            {i < STEPS.length - 1 && <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />}
+      {/* ── 1. PAGE HEADER ────────────────────────────────────────── */}
+      <div className="space-y-4 pb-6 border-b border-border/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-sky-400" />
+              <h1 className="text-lg sm:text-xl font-bold tracking-tight text-foreground">
+                AI Product Insights
+              </h1>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              What should we build, fix, or improve — and why?
+            </p>
           </div>
-        ))}
-        <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border border-green-500/20 bg-green-500/10 text-green-400 shrink-0">PRD</span>
-      </div>
-
-      {/* ── FILTERS & SEARCH ────────────────────────────────────── */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-          <input type="text" placeholder="Search insights..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            className="bg-card border border-border focus:border-ring rounded-lg py-1.5 pl-9 pr-4 text-xs text-foreground focus:outline-none placeholder:text-muted-foreground w-52" />
-        </div>
-        {(["all", "pending", "approved", "rejected"] as ActiveFilter[]).map(f => (
-          <button key={f} onClick={() => setActiveFilter(f)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border capitalize transition-all ${
-              activeFilter === f ? "bg-primary/10 border-primary/20 text-primary" : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
-            }`}>
-            {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
-            <span className="text-[9px] font-mono">{counts[f]}</span>
+          <button
+            onClick={() => navigate("/pmx/analysis")}
+            className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-sky-500 hover:bg-sky-400 px-3.5 py-2 text-xs font-semibold text-black transition-all shadow-sm"
+          >
+            <TrendingUp className="h-3.5 w-3.5" />
+            Run AI Experience Intelligence →
           </button>
-        ))}
+        </div>
+
+        {/* Intelligence pipeline progression */}
+        <div className="flex items-center gap-2 text-[10px] font-medium text-muted-foreground/70 overflow-x-auto scrollbar-none pt-1">
+          <span className="text-foreground/90 font-semibold">Evidence</span>
+          <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+          <span className="text-foreground/90 font-semibold">Problem</span>
+          <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+          <span className="text-foreground/90 font-semibold">Opportunity</span>
+          <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+          <span className="text-sky-400 font-semibold">Recommendation</span>
+          <ArrowRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
+          <span className="text-muted-foreground">PRD Blueprint</span>
+        </div>
+
+        {/* Metric counts line */}
+        <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap pt-1">
+          <span className="font-semibold text-foreground">{counts.all} recommendations</span>
+          <span>·</span>
+          <span className="inline-flex items-center gap-1.5 text-[11px]">
+            <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+            <span className="font-medium text-foreground">{counts.pending}</span> pending review
+          </span>
+          {counts.approved > 0 && (
+            <>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1.5 text-[11px]">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                <span className="font-medium text-foreground">{counts.approved}</span> approved
+              </span>
+            </>
+          )}
+          {counts.rejected > 0 && (
+            <>
+              <span>·</span>
+              <span className="inline-flex items-center gap-1.5 text-[11px]">
+                <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />
+                <span className="font-medium text-foreground">{counts.rejected}</span> rejected
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* ── EMPTY STATE ─────────────────────────────────────────── */}
-      {isEmpty && (
-        <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-          <div className="h-14 w-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-            <Sparkles className="h-7 w-7 text-primary" />
+      {/* ── 2. PRODUCT SIGNAL / EXECUTIVE SUMMARY ─────────────────── */}
+      {!isEmpty && (
+        <section className="space-y-2 pb-6 border-b border-border/40">
+          <h2 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+            Product Signal
+          </h2>
+          <p className="text-xs text-foreground/90 leading-relaxed font-normal">
+            PMX synthesized <span className="font-semibold text-foreground">{decisions.length} actionable product opportunities</span> across your active codebase and UX scan.
+            {topPending && (
+              <> The highest-priority initiative is <span className="font-semibold text-foreground">"{topPending.title}"</span> ({topPending.category}), with complementary signals across {uniqueCategories.slice(0, 3).join(", ")}.</>
+            )}
+          </p>
+        </section>
+      )}
+
+      {/* ── 3. FILTER & SEARCH CONTROLS ───────────────────────────── */}
+      {!isEmpty && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+          {/* Segmented status filter */}
+          <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-lg border border-border/50 self-start sm:self-auto">
+            {(["all", "pending", "approved", "rejected"] as ActiveFilter[]).map(f => (
+              <button
+                key={f}
+                onClick={() => setActiveFilter(f)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold capitalize transition-all ${
+                  activeFilter === f
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground/80"
+                }`}
+              >
+                <span>{f === "all" ? "All" : f}</span>
+                <span className="text-[10px] font-mono text-muted-foreground/70">
+                  {counts[f]}
+                </span>
+              </button>
+            ))}
           </div>
-          <div>
-            <p className="text-sm font-semibold text-foreground">No insights yet</p>
-            <p className="text-xs text-muted-foreground mt-1 max-w-xs">Connect product sources and run AI analysis to generate insights, problems, opportunities, and recommendations.</p>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => navigate("/pmx/sources")} className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-4 py-2 text-xs font-semibold text-primary-foreground transition-all">
-              Connect Sources
-            </button>
-            <button onClick={() => navigate("/pmx/analysis")} className="flex items-center gap-1.5 rounded-lg border border-border hover:bg-muted px-4 py-2 text-xs font-medium text-muted-foreground transition-all">
-              Run Analysis
+
+          <div className="flex items-center gap-2">
+            {/* Search */}
+            <div className="relative flex-1 sm:w-56">
+              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search insights..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full bg-muted/30 border border-border/50 focus:border-ring rounded-md py-1 pl-8 pr-3 text-xs text-foreground focus:outline-none placeholder:text-muted-foreground/60 transition-colors"
+              />
+            </div>
+
+            {/* Expand / Collapse all */}
+            <button
+              onClick={toggleAllExpanded}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0 px-2 py-1"
+            >
+              {expandedIds.size === filtered.length ? "Collapse all" : "Expand all"}
             </button>
           </div>
         </div>
       )}
 
-      {/* ── INSIGHT CARDS ───────────────────────────────────────── */}
-      <div className="space-y-4">
+      {/* ── 4. CONTEXTUAL BULK ACTIONS TOOLBAR ─────────────────────── */}
+      {pendingFiltered.length > 0 && selectedIds.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/30 px-3.5 py-2 text-xs"
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-muted-foreground text-[11px]">
+              <span className="font-semibold text-foreground">{selectedIds.length}</span> of {pendingFiltered.length} pending selected
+            </span>
+            <button
+              onClick={() => setSelectedIds(pendingFiltered.map(d => d._id))}
+              className="text-[11px] text-sky-400 hover:underline font-medium"
+            >
+              Select all pending
+            </button>
+            <span className="text-border">|</span>
+            <button
+              onClick={() => setSelectedIds([])}
+              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBulkReject}
+              disabled={bulkProcessing}
+              className="flex items-center gap-1.5 px-3 py-1 rounded-md border border-border hover:bg-muted text-muted-foreground hover:text-foreground transition-all text-xs disabled:opacity-50"
+            >
+              <ThumbsDown className="h-3 w-3" /> Reject {selectedIds.length}
+            </button>
+            <button
+              onClick={handleBulkApprove}
+              disabled={bulkProcessing}
+              className="flex items-center gap-1.5 rounded-md bg-sky-500 hover:bg-sky-400 px-3 py-1 text-xs font-semibold text-black transition-all disabled:opacity-50 shadow-sm"
+            >
+              {bulkProcessing ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <ThumbsUp className="h-3 w-3 fill-current" />
+              )}
+              Approve {selectedIds.length}
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── 5. EMPTY STATE ─────────────────────────────────────────── */}
+      {isEmpty && (
+        <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
+          <Sparkles className="h-8 w-8 text-border" />
+          <p className="text-xs font-semibold text-foreground">No insights yet</p>
+          <p className="text-[11px] text-muted-foreground/70 max-w-sm leading-relaxed">
+            Run PMX Experience Intelligence or connect product sources to identify high-impact opportunities and recommendations.
+          </p>
+          <div className="flex gap-2 pt-2">
+            <button
+              onClick={() => navigate("/pmx/sources")}
+              className="px-3 py-1.5 rounded-lg border border-border/60 hover:bg-muted text-xs font-medium text-foreground transition-colors"
+            >
+              Connect Sources
+            </button>
+            <button
+              onClick={() => navigate("/pmx/analysis")}
+              className="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-xs font-semibold text-black transition-colors"
+            >
+              Run UX Audit
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 6. PRIORITIZED DECISION REPORT ─────────────────────────── */}
+      <div className="divide-y divide-border/30">
         {filtered.map((dec, idx) => {
           const linkedOpp  = getLinkedOpportunity(dec);
           const linkedProbs = getLinkedProblems(dec);
           const linkedEvid  = getLinkedEvidence(dec);
-          const isExpanded  = expandedId === dec._id;
+          const isExpanded  = expandedIds.has(dec._id);
           const isApproved  = dec.status === "approved";
           const isRejected  = dec.status === "rejected";
           const isPending   = dec.status === "pending";
+          const numStr      = String(idx + 1).padStart(2, "0");
 
           return (
-            <motion.div key={dec._id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
-              className={`rounded-2xl border bg-card/40 overflow-hidden transition-all ${
-                isApproved ? "border-green-500/20" : isRejected ? "border-border/30 opacity-60" : "border-border/50 hover:border-border"
-              }`}>
+            <div key={dec._id} className="py-6 first:pt-0 last:pb-0 space-y-3 transition-colors">
 
-              {/* ── TOP: Status + Title + Confidence ── */}
-              <div className="p-5 space-y-3">
-                <div className="flex items-start gap-4">
-                  <ConfidenceRing value={dec.confidence} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                      <span className={`text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
-                        dec.category === "build"   ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
-                        dec.category === "improve" ? "bg-green-500/10 border-green-500/20 text-green-400" :
-                        dec.category === "optimize"? "bg-teal-500/10 border-teal-500/20 text-teal-400" :
-                        dec.category === "remove"  ? "bg-red-500/10 border-red-500/20 text-red-400" :
-                        "bg-purple-500/10 border-purple-500/20 text-purple-400"
-                      }`}>{dec.category}</span>
-                      {isApproved && <span className="flex items-center gap-1 text-[9px] font-semibold text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-0.5 rounded-full"><CheckCircle2 className="h-2.5 w-2.5" />Approved</span>}
-                      {isRejected && <span className="text-[9px] font-semibold text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">Rejected</span>}
-                      {isPending  && <span className="flex items-center gap-1 text-[9px] font-semibold text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 px-2 py-0.5 rounded-full"><Circle className="h-2 w-2 fill-current" />Pending Review</span>}
+              {/* Row Header */}
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  {/* Select checkbox for pending */}
+                  {isPending ? (
+                    <div className="pt-0.5 shrink-0">
+                      <Checkbox
+                        checked={selectedIds.includes(dec._id)}
+                        onClick={(e) => { e.stopPropagation(); toggleSelect(dec._id); }}
+                      />
                     </div>
-                    <h3 className="text-sm font-bold text-foreground leading-snug">{dec.title}</h3>
-                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed line-clamp-2">{dec.reasoning}</p>
-                  </div>
+                  ) : (
+                    <span className="font-mono text-xs font-semibold text-muted-foreground/60 shrink-0 mt-0.5 select-none">
+                      {numStr}
+                    </span>
+                  )}
 
-                  {/* Metrics row */}
-                  <div className="hidden md:flex items-center gap-3 shrink-0">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-foreground leading-snug">
+                        {dec.title}
+                      </h3>
+                      {isApproved && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded">
+                          <CheckCircle2 className="h-2.5 w-2.5" /> Approved
+                        </span>
+                      )}
+                      {isRejected && (
+                        <span className="text-[10px] font-semibold text-muted-foreground bg-muted/60 px-2 py-0.5 rounded">
+                          Rejected
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Metadata line */}
+                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+                      <span className="capitalize font-medium text-sky-400">
+                        {dec.category || "Recommendation"}
+                      </span>
+                      <span>·</span>
+                      <span>Product Signals & UX Audit</span>
+                      <span>·</span>
+                      <span>{dec.confidence}% confidence</span>
+                    </div>
+
+                    {/* One-sentence summary */}
+                    <p className="text-xs text-foreground/80 leading-relaxed pt-0.5 font-normal">
+                      {dec.reasoning}
+                    </p>
+
+                    {/* Compact RICE & Impact metrics */}
                     {linkedOpp && (
-                      <>
-                        <div className="text-center">
-                          <p className="text-[8px] text-muted-foreground uppercase tracking-wider">Impact</p>
-                          <p className="text-sm font-bold font-mono text-yellow-400">{linkedOpp.userImpact}/10</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[8px] text-muted-foreground uppercase tracking-wider">Effort</p>
-                          <p className="text-sm font-bold font-mono text-orange-400">{linkedOpp.effort}/10</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[8px] text-muted-foreground uppercase tracking-wider">RICE</p>
-                          <p className="text-sm font-bold font-mono text-primary">{linkedOpp.riceScore}</p>
-                        </div>
-                      </>
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground pt-1 flex-wrap">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-muted-foreground/70">Impact:</span>
+                          <span className="font-mono font-semibold text-foreground">{linkedOpp.userImpact}/10</span>
+                        </span>
+                        <span>·</span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-muted-foreground/70">Effort:</span>
+                          <span className="font-mono font-semibold text-foreground">{linkedOpp.effort}/10</span>
+                        </span>
+                        <span>·</span>
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-muted-foreground/70">RICE:</span>
+                          <span className="font-mono font-semibold text-sky-400">{linkedOpp.riceScore}</span>
+                        </span>
+                        {dec.estimatedROI && (
+                          <>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-1">
+                              <span className="text-muted-foreground/70">Expected ROI:</span>
+                              <span className="font-semibold text-foreground">{dec.estimatedROI}</span>
+                            </span>
+                          </>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
 
-                {/* ── Evidence pills ── */}
-                <div className="flex flex-wrap gap-1.5">
-                  {linkedEvid.map((ev, i) => (
-                    <EvidencePill key={i} icon={
-                      ev.category === "customer"    ? MessageSquare :
-                      ev.category === "behavior"    ? TrendingUp :
-                      ev.category === "business"    ? DollarSign :
-                      ev.category === "engineering" ? Cpu : BarChart3
-                    } label={ev.title.slice(0, 28)} color={
-                      ev.category === "customer"    ? "bg-green-500/5 border-green-500/20 text-green-400" :
-                      ev.category === "behavior"    ? "bg-blue-500/5 border-blue-500/20 text-blue-400" :
-                      ev.category === "business"    ? "bg-yellow-500/5 border-yellow-500/20 text-yellow-400" :
-                      ev.category === "engineering" ? "bg-purple-500/5 border-purple-500/20 text-purple-400" :
-                      "bg-muted/50 border-border text-muted-foreground"
-                    } />
-                  ))}
-                  {linkedProbs.slice(0, 1).map((p, i) => (
-                    <EvidencePill key={`p-${i}`} icon={AlertTriangle} label={p.title.slice(0, 28)}
-                      color={p.severity === "critical" ? "bg-red-500/5 border-red-500/20 text-red-400" : "bg-orange-500/5 border-orange-500/20 text-orange-400"} />
-                  ))}
-                </div>
-
-                {/* ── CTA row ── */}
-                <div className="flex items-center gap-2 pt-1">
-                  <button onClick={() => setExpandedId(isExpanded ? null : dec._id)}
-                    className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors">
-                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                    {isExpanded ? "Hide reasoning" : "Full AI reasoning"}
-                  </button>
-                  <div className="flex-1" />
+                {/* Primary Decision Action */}
+                <div className="shrink-0 flex items-center gap-2">
                   {isPending && (
                     <>
-                      <button onClick={() => handleReject(dec._id, dec.title)} disabled={updatingId === dec._id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:border-destructive/30 hover:bg-destructive/5 text-muted-foreground hover:text-destructive transition-all text-xs">
-                        <ThumbsDown className="h-3 w-3" /> Reject
+                      <button
+                        onClick={() => handleReject(dec._id, dec.title)}
+                        disabled={updatingId === dec._id}
+                        className="px-2.5 py-1.5 rounded-md border border-border/60 hover:bg-muted text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
+                        title="Reject recommendation"
+                      >
+                        Reject
                       </button>
-                      <button onClick={() => handleGeneratePrd(dec._id, dec.title)} disabled={updatingId === dec._id}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground transition-all text-xs">
-                        <FileText className="h-3 w-3" /> Edit
+                      <button
+                        onClick={() => handleGeneratePrd(dec._id, dec.title)}
+                        disabled={updatingId === dec._id}
+                        className="px-2.5 py-1.5 rounded-md border border-border/60 hover:bg-muted text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
+                      >
+                        Edit
                       </button>
-                      <button onClick={() => handleApprove(dec._id, dec.title)} disabled={updatingId === dec._id}
-                        className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-3.5 py-1.5 text-xs font-semibold text-primary-foreground transition-all disabled:opacity-50">
-                        {updatingId === dec._id
-                          ? <div className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                          : <><ThumbsUp className="h-3 w-3 fill-current" /> Approve</>}
+                      <button
+                        onClick={() => handleApprove(dec._id, dec.title)}
+                        disabled={updatingId === dec._id}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-sky-500 hover:bg-sky-400 px-3 py-1.5 text-xs font-semibold text-black transition-all shadow-sm disabled:opacity-50"
+                      >
+                        {updatingId === dec._id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <ThumbsUp className="h-3 w-3 fill-current" />
+                        )}
+                        Approve →
                       </button>
                     </>
                   )}
+
                   {isApproved && (
-                    <button onClick={() => navigate("/pmx/prd")}
-                      className="flex items-center gap-1.5 rounded-lg border border-green-500/20 bg-green-500/5 hover:bg-green-500/10 px-3.5 py-1.5 text-xs font-semibold text-green-400 transition-all">
-                      <FileText className="h-3 w-3" /> Open PRD <ArrowRight className="h-3 w-3" />
+                    <button
+                      onClick={() => navigate("/pmx/prd")}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-border/60 hover:border-foreground/30 hover:bg-muted/40 px-3 py-1.5 text-xs font-semibold text-foreground transition-all"
+                    >
+                      <FileText className="h-3 w-3 text-sky-400" />
+                      Open PRD →
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* ── EXPANDED: Full reasoning ─────────────────────── */}
+              {/* Expand reasoning toggle */}
+              <div className="pl-6">
+                <button
+                  onClick={() => toggleExpand(dec._id)}
+                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-sky-400 transition-colors"
+                >
+                  {isExpanded ? (
+                    <>Hide reasoning <ChevronUp className="h-3 w-3" /></>
+                  ) : (
+                    <>Why PMX recommends this <ChevronDown className="h-3 w-3" /></>
+                  )}
+                </button>
+              </div>
+
+              {/* Expanded Reasoning & Evidence Details */}
               <AnimatePresence>
                 {isExpanded && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
-                    className="border-t border-border/40 bg-card/20">
-                    <div className="p-5 grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="pl-6 pt-3 space-y-4 text-xs leading-relaxed border-l-2 border-border/40 ml-2">
 
-                      {/* Left: full reasoning chain */}
-                      <div className="space-y-4">
-                        <div className="space-y-1.5">
-                          <p className="text-[10px] text-red-400 uppercase tracking-wider font-bold flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Problem Detected</p>
-                          {linkedProbs.length > 0 ? linkedProbs.map((p, i) => (
-                            <div key={i} className="rounded-lg bg-red-500/5 border border-red-500/10 p-3 space-y-1">
-                              <p className="text-xs font-semibold text-foreground">{p.title}</p>
-                              <p className="text-[10px] text-muted-foreground leading-relaxed">{p.description}</p>
-                              {p.suggestedFix && <p className="text-[10px] text-primary/80 italic">{p.suggestedFix}</p>}
-                            </div>
-                          )) : <p className="text-[10px] text-muted-foreground">No linked problems found.</p>}
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <p className="text-[10px] text-primary uppercase tracking-wider font-bold flex items-center gap-1"><Sparkles className="h-3 w-3" />AI Reasoning</p>
-                          <p className="text-[11px] text-foreground/80 leading-relaxed">{dec.reasoning}</p>
-                        </div>
-
-                        {dec.evidence && (
-                          <div className="rounded-lg bg-card/60 border border-border/40 p-3">
-                            <p className="text-[9px] text-muted-foreground uppercase font-bold mb-1">Supporting Evidence</p>
-                            <p className="text-[11px] text-muted-foreground italic">"{dec.evidence}"</p>
-                          </div>
-                        )}
-
-                        {dec.tradeoffs && (
-                          <div className="space-y-1">
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">Trade-offs</p>
-                            <p className="text-[11px] text-foreground/80 leading-relaxed">{dec.tradeoffs}</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Right: opportunity + business impact */}
-                      <div className="space-y-4">
-                        {linkedEvid.length > 0 && (
-                          <div className="space-y-2">
-                            <p className="text-[10px] text-purple-400 uppercase tracking-wider font-bold flex items-center gap-1"><Users className="h-3 w-3" />Customer Evidence</p>
-                            {linkedEvid.slice(0, 2).map((ev, i) => (
-                              <div key={i} className="rounded-lg bg-purple-500/5 border border-purple-500/10 p-3 space-y-1">
-                                <p className="text-xs font-semibold text-foreground">{ev.title}</p>
-                                {ev.quote && <p className="text-[10px] text-muted-foreground italic pl-2 border-l border-purple-500/20">"{ev.quote}"</p>}
-                                <p className="text-[10px] text-muted-foreground leading-relaxed">{ev.description}</p>
+                      {/* Problems detected */}
+                      {linkedProbs.length > 0 && (
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Problem Detected
+                          </span>
+                          <div className="space-y-1.5 mt-1">
+                            {linkedProbs.map((p, i) => (
+                              <div key={i} className="text-foreground/85">
+                                <span className="font-semibold text-foreground">{p.title}</span>
+                                {p.description && <span className="text-muted-foreground ml-1.5">— {p.description}</span>}
+                                {p.suggestedFix && (
+                                  <p className="text-[11px] text-sky-400 mt-0.5">Suggested fix: {p.suggestedFix}</p>
+                                )}
                               </div>
                             ))}
                           </div>
-                        )}
+                        </div>
+                      )}
 
-                        <div className="rounded-xl bg-card/60 border border-border/40 p-4 space-y-3">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-bold">Business Impact</p>
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="text-center rounded-lg bg-card border border-border/50 p-2.5">
-                              <p className="text-[8px] text-muted-foreground uppercase tracking-wider">Expected ROI</p>
-                              <p className="text-xs font-bold text-primary mt-0.5">{dec.estimatedROI || "TBD"}</p>
+                      {/* Supporting Evidence */}
+                      {dec.evidence && (
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Supporting Evidence
+                          </span>
+                          <p className="text-foreground/80 mt-0.5 italic">
+                            "{dec.evidence}"
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Trade-offs & Expected Outcome */}
+                      {(dec.tradeoffs || dec.expectedOutcome) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          {dec.tradeoffs && (
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                Trade-offs
+                              </span>
+                              <p className="text-foreground/80 mt-0.5">{dec.tradeoffs}</p>
                             </div>
-                            <div className="text-center rounded-lg bg-card border border-border/50 p-2.5">
-                              <p className="text-[8px] text-muted-foreground uppercase tracking-wider">Outcome</p>
-                              <p className="text-xs font-bold text-foreground mt-0.5 line-clamp-1">{dec.expectedOutcome || "TBD"}</p>
-                            </div>
-                          </div>
-                          {linkedOpp && (
-                            <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/30">
-                              {[
-                                { label: "Impact", value: `${linkedOpp.userImpact}/10`, color: "text-blue-400" },
-                                { label: "RICE",   value: linkedOpp.riceScore,           color: "text-primary" },
-                                { label: "Risk",   value: linkedOpp.risk,                color: linkedOpp.risk === "high" ? "text-red-400" : linkedOpp.risk === "medium" ? "text-yellow-400" : "text-green-400" },
-                              ].map(m => (
-                                <div key={m.label} className="text-center">
-                                  <p className="text-[8px] text-muted-foreground uppercase">{m.label}</p>
-                                  <p className={`text-xs font-bold font-mono capitalize ${m.color}`}>{m.value}</p>
-                                </div>
-                              ))}
+                          )}
+                          {dec.expectedOutcome && (
+                            <div>
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                Expected Outcome
+                              </span>
+                              <p className="text-foreground/80 mt-0.5">{dec.expectedOutcome}</p>
                             </div>
                           )}
                         </div>
+                      )}
 
-                        {isPending && (
-                          <button onClick={() => handleApprove(dec._id, dec.title)} disabled={updatingId === dec._id}
-                            className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary hover:bg-primary/90 px-4 py-2.5 text-xs font-semibold text-primary-foreground transition-all disabled:opacity-50">
-                            {updatingId === dec._id
-                              ? <div className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                              : <><ThumbsUp className="h-3.5 w-3.5 fill-current" />Approve & Generate PRD</>}
-                          </button>
-                        )}
-                        {isApproved && (
-                          <button onClick={() => navigate("/pmx/prd")}
-                            className="w-full flex items-center justify-center gap-2 rounded-xl border border-green-500/20 bg-green-500/5 hover:bg-green-500/10 px-4 py-2.5 text-xs font-semibold text-green-400 transition-all">
-                            <FileText className="h-3.5 w-3.5" />Open PRD Blueprint <ArrowRight className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
+                      {/* Customer quotes if present */}
+                      {linkedEvid.some(e => e.quote) && (
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            User Feedback
+                          </span>
+                          <div className="space-y-1 mt-0.5">
+                            {linkedEvid.filter(e => e.quote).map((e, i) => (
+                              <p key={i} className="text-muted-foreground italic text-[11px]">
+                                "{e.quote}" — <span className="text-foreground/70 not-italic">{e.title}</span>
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </motion.div>
+            </div>
           );
         })}
 
         {!isEmpty && filtered.length === 0 && (
-          <div className="py-16 text-center text-muted-foreground text-xs">
-            No insights match your filter.
+          <div className="py-12 text-center text-muted-foreground text-xs italic">
+            No recommendations match the selected filters.
           </div>
         )}
       </div>
     </div>
   );
 }
+
