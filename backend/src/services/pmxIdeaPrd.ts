@@ -40,7 +40,7 @@ export interface IdeaPrdResult {
   model: string;
 }
 
-export async function generateIdeaPrd(idea: string): Promise<IdeaPrdResult> {
+export async function generateIdeaPrd(idea: string, userId?: string, projectId?: string): Promise<IdeaPrdResult> {
   const prompt = getIdeaOneShotPrompt(idea);
   let tokensUsed = 0;
 
@@ -48,7 +48,7 @@ export async function generateIdeaPrd(idea: string): Promise<IdeaPrdResult> {
     "ideaPrdGenerate",
     MAX_TOKENS_GENERATE,
     async (reportCompletionTokens) => {
-      const { content, usage, finishReason } = await callDeepSeekWithUsage(prompt, AI_MODEL_PRO, MAX_TOKENS_GENERATE, undefined, "ideaPrdGenerate");
+      const { content, usage, finishReason } = await callDeepSeekWithUsage(prompt, AI_MODEL_PRO, MAX_TOKENS_GENERATE, undefined, "ideaPrdGenerate", userId, projectId);
       reportCompletionTokens(usage.completion_tokens || 0);
       tokensUsed = usage.completion_tokens || 0;
       const result = parseJsonResponse(content, "ideaPrdGenerate");
@@ -86,7 +86,9 @@ export interface IdeaPrdRefineResult {
 export async function refineIdeaPrd(
   currentMarkdown: string,
   stack: IPmxIdeaPrdStack,
-  instruction: string
+  instruction: string,
+  userId?: string,
+  projectId?: string
 ): Promise<IdeaPrdRefineResult> {
   const prompt = getIdeaRefinePrompt(currentMarkdown, stack as Record<string, string | undefined>, instruction);
   let tokensUsed = 0;
@@ -95,7 +97,7 @@ export async function refineIdeaPrd(
     "ideaPrdRefine",
     MAX_TOKENS_REFINE,
     async (reportCompletionTokens) => {
-      const { content, usage } = await callDeepSeekWithUsage(prompt, AI_MODEL_PRO, MAX_TOKENS_REFINE, undefined, "ideaPrdRefine");
+      const { content, usage } = await callDeepSeekWithUsage(prompt, AI_MODEL_PRO, MAX_TOKENS_REFINE, undefined, "ideaPrdRefine", userId, projectId);
       reportCompletionTokens(usage.completion_tokens || 0);
       tokensUsed = usage.completion_tokens || 0;
       return parseJsonResponse(content, "ideaPrdRefine");

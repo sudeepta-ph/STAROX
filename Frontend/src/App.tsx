@@ -30,6 +30,7 @@ import Connectors from "@/pages/Connectors";
 // Blog Pages
 import Blog from "./pages/Blog";
 import BlogPost from "./pages/BlogPost";
+import BlogUnsubscribe from "./pages/BlogUnsubscribe";
 import AdminBlogDashboard from "./pages/AdminBlogDashboard";
 import AdminBlogEditor from "./pages/AdminBlogEditor";
 import AdminMediaLibrary from "./pages/AdminMediaLibrary";
@@ -49,6 +50,7 @@ import PmxProducts from "@/pages/pmx/PmxProducts";
 import PmxDocs from "@/pages/pmx/PmxDocs";
 import PmxJoin from "@/pages/pmx/PmxJoin";
 import PmxJoinCode from "@/pages/pmx/PmxJoinCode";
+import PmxAcceptInvite from "@/pages/pmx/PmxAcceptInvite";
 
 const CLERK_PUBLISHABLE_KEY = (import.meta as any).env.VITE_CLERK_PUBLISHABLE_KEY;
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
@@ -100,12 +102,16 @@ function ClerkAuthSync() {
 
         const pendingInviteToken = sessionStorage.getItem("pmx_pending_invite_token");
         const pendingInviteCode = sessionStorage.getItem("pmx_pending_invite_code");
+        const pendingEmailInviteToken = sessionStorage.getItem("pmx_pending_email_invite_token");
         if (pendingInviteToken) {
           sessionStorage.removeItem("pmx_pending_invite_token");
           navigate(`/pmx/join/${pendingInviteToken}`);
         } else if (pendingInviteCode) {
           sessionStorage.removeItem("pmx_pending_invite_code");
           navigate(`/pmx/join?code=${encodeURIComponent(pendingInviteCode)}`);
+        } else if (pendingEmailInviteToken) {
+          sessionStorage.removeItem("pmx_pending_email_invite_token");
+          navigate(`/pmx/invite/${pendingEmailInviteToken}`);
         }
       } else {
         setUser(null);
@@ -114,7 +120,15 @@ function ClerkAuthSync() {
     };
 
     syncUserSession();
-  }, [isLoaded, isSignedIn, clerkUser, setUser, setLoading, navigate]);
+    // Depends on clerkUser?.id rather than the whole clerkUser object —
+    // Clerk hands out a new object reference on internal session-refresh
+    // cycles even when the signed-in identity hasn't changed, which was
+    // re-running this effect (and its /api/users/me call) far more often
+    // than an actual sign-in/out/account-switch. clerkUser itself is still
+    // read from the closure inside syncUserSession above; only the
+    // re-run trigger is narrowed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, isSignedIn, clerkUser?.id, setUser, setLoading, navigate]);
 
   return null;
 }
@@ -200,12 +214,14 @@ export default function App() {
 
             {/* Public Blog Routes */}
             <Route path="/blog" element={<Blog />} />
+            <Route path="/blog/unsubscribe/:token" element={<BlogUnsubscribe />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
 
             {/* Public PMX workspace invite — code entry is the current mechanism;
                 the token route stays live only to resolve already-distributed links */}
             <Route path="/pmx/join" element={<PmxJoinCode />} />
             <Route path="/pmx/join/:token" element={<PmxJoin />} />
+            <Route path="/pmx/invite/:token" element={<PmxAcceptInvite />} />
 
             {/* Public Pages */}
             <Route path="/" element={<Navigate to="/starox-intelligence" replace />} />

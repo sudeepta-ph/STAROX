@@ -16,7 +16,9 @@ import {
   CheckCircle,
   ArrowLeft,
   TrendingUp,
-  Inbox
+  Inbox,
+  Mail,
+  UserMinus
 } from "lucide-react";
 
 function useIsMobile() {
@@ -42,6 +44,41 @@ export default function AdminBlogDashboard() {
   const [loading, setLoading] = useState(true);
   const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
 
+  const [subscriberSummary, setSubscriberSummary] = useState<{ total: number; active: number; unsubscribed: number } | null>(null);
+  const [subscribers, setSubscribers] = useState<any[]>([]);
+  const [subscriberActionLoading, setSubscriberActionLoading] = useState<string | null>(null);
+
+  const fetchSubscribers = async () => {
+    try {
+      const token = await (window as any).Clerk?.session?.getToken();
+      const headers = { Authorization: `Bearer ${token}` };
+      const res = await fetch(`${API_URL}/admin/blog-subscribers?limit=10`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setSubscriberSummary(data.summary);
+        setSubscribers(data.subscribers || []);
+      }
+    } catch (err) {
+      console.error("Failed to load blog subscribers:", err);
+    }
+  };
+
+  const handleUnsubscribe = async (id: string) => {
+    setSubscriberActionLoading(id);
+    try {
+      const token = await (window as any).Clerk?.session?.getToken();
+      const res = await fetch(`${API_URL}/admin/blog-subscribers/${id}/unsubscribe`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) fetchSubscribers();
+    } catch (err) {
+      console.error("Failed to unsubscribe:", err);
+    } finally {
+      setSubscriberActionLoading(null);
+    }
+  };
+
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
@@ -59,6 +96,8 @@ export default function AdminBlogDashboard() {
         const postsData = await postsRes.json();
         setPosts(postsData.posts || []);
       }
+
+      await fetchSubscribers();
     } catch (err) {
       console.error("Failed to load admin stats:", err);
     } finally {
@@ -283,6 +322,54 @@ export default function AdminBlogDashboard() {
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* Blog Subscribers */}
+              <div className="glass-card p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-primary" />
+                    Blog Subscribers
+                  </h3>
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="font-semibold text-foreground">{subscriberSummary?.total ?? 0} subscribers</span>
+                    <span className="text-emerald-400">{subscriberSummary?.active ?? 0} active</span>
+                    <span className="text-muted-foreground">{subscriberSummary?.unsubscribed ?? 0} unsubscribed</span>
+                  </div>
+                </div>
+                {subscribers.length === 0 ? (
+                  <div className="text-center py-6 text-xs text-muted-foreground">No subscribers yet</div>
+                ) : (
+                  <div className="divide-y divide-border/30">
+                    {subscribers.map((sub) => (
+                      <div key={sub._id} className="py-2.5 flex items-center justify-between text-xs gap-3">
+                        <span className="truncate max-w-[280px] font-medium">{sub.email}</span>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(sub.subscribedAt).toLocaleDateString()}
+                          </span>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                            sub.status === "active"
+                              ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                              : "text-muted-foreground bg-muted border-border"
+                          }`}>
+                            {sub.status === "active" ? "Active" : "Unsubscribed"}
+                          </span>
+                          {sub.status === "active" && (
+                            <button
+                              onClick={() => handleUnsubscribe(sub._id)}
+                              disabled={subscriberActionLoading === sub._id}
+                              title="Unsubscribe"
+                              className="p-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
+                            >
+                              <UserMinus className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Bottom Section: Full Posts Table */}

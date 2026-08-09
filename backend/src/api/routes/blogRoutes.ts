@@ -1,13 +1,35 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
+import rateLimit from 'express-rate-limit';
+import crypto from 'node:crypto';
 import UserModel from '../../models/User.js';
 import BlogModel from '../../models/Blog.js';
 import MediaModel from '../../models/Media.js';
+import BlogSubscriberModel from '../../models/BlogSubscriber.js';
 import { authMiddleware, optionalAuth, AuthenticatedRequest } from '../../middleware/auth.js';
 import { adminMiddleware } from '../../middleware/admin.js';
 import { uploadToCloudinary, deleteFromCloudinary } from '../../services/cloudinary.js';
+import { notifyBlogSubscribers } from '../../services/blogNotify.js';
 
 export const blogRouter = Router();
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+// Scoped to the one subscribe route below (never blogRouter.use) — same
+// shape as contact.ts's demoRequestLimiter. 8 requests per 10 minutes per
+// IP is generous for a real visitor (who only ever needs one) while still
+// bounding abuse; app.ts already sets "trust proxy" so req.ip is correct.
+const blogSubscribeLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  statusCode: 429,
+  message: { success: false, error: 'Too many requests, please try again later.' },
+});
 
 // Multer memory storage (Buffer) for Cloudinary upload
 const upload = multer({
@@ -274,7 +296,16 @@ blogRouter.post('/blogs', authMiddleware, adminMiddleware, async (req: Authentic
     });
 
     console.log('[Admin CMS] Created blog post in MongoDB:', newPost._id);
-    return res.status(201).json(newPost);
+    res.status(201).json(newPost);
+
+    // Published immediately on creation — there's no prior document, so
+    // this is unconditionally a first-publish event. Fired after the
+    // response is already sent; a slow/failing broadcast can never delay
+    // or break the create request (see notifyBlogSubscribers).
+    if (newPost.status === 'published') {
+      notifyBlogSubscribers(newPost).catch((err) => console.error('[Blog Notify] Failed for new post:', err));
+    }
+    return;
   } catch (error) {
     console.error('[Admin CMS] Create Blog Error:', error);
     return res.status(500).json({ error: 'Failed to create blog post' });
@@ -298,9 +329,15 @@ blogRouter.put('/blogs/:id', authMiddleware, adminMiddleware, async (req: Authen
       updatedBy: mongoUserId
     };
 
+    // wasPublished captures the PRE-update status — this is the exact
+    // draft/archived/scheduled -> published transition check (see
+    // blogNotify.ts's atomic claim for why a naive compare like this is
+    // still safe under a retried request).
+    let wasPublished = false;
     if (blogData.status === 'published') {
       const currentPost = await BlogModel.findById(id);
       updates.publishedAt = currentPost?.publishedAt || new Date();
+      wasPublished = currentPost?.status === 'published';
     }
 
     const updatedPost = await BlogModel.findByIdAndUpdate(
@@ -314,7 +351,17 @@ blogRouter.put('/blogs/:id', authMiddleware, adminMiddleware, async (req: Authen
     }
 
     console.log('[Admin CMS] Updated blog post in MongoDB:', id);
-    return res.json(updatedPost);
+    res.json(updatedPost);
+
+    // Only a genuine draft/archived/scheduled -> published transition
+    // notifies subscribers — never a draft save, a preview, an edit to an
+    // already-published post, or a delete. Fired after the response is
+    // already sent (see notifyBlogSubscribers for the atomic once-only
+    // guarantee that also covers a retried publish request).
+    if (blogData.status === 'published' && !wasPublished) {
+      notifyBlogSubscribers(updatedPost).catch((err) => console.error('[Blog Notify] Failed for published post:', err));
+    }
+    return;
   } catch (error) {
     console.error('[Admin CMS] Update Blog Error:', error);
     return res.status(500).json({ error: 'Failed to update blog post' });
@@ -476,5 +523,146 @@ blogRouter.get('/admin/stats', authMiddleware, adminMiddleware, async (req: Auth
   } catch (error) {
     console.error('[Admin Stats] Query failed:', error);
     return res.status(500).json({ error: 'Failed to fetch admin stats' });
+  }
+});
+
+// ==========================================
+// BLOG SUBSCRIPTIONS (public — no STAROX/PMX account required)
+// ==========================================
+
+// Subscribe (and, for a previously-unsubscribed address, resubscribe) with
+// just an email address. Idempotent: submitting the same email twice never
+// creates a second row and never re-sends anything.
+blogRouter.post('/blogs/subscribe', blogSubscribeLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (typeof email !== 'string' || !email.trim()) {
+      return res.status(400).json({ success: false, error: 'Enter a valid email address.' });
+    }
+    const normalized = normalizeEmail(email);
+    if (!EMAIL_RE.test(normalized)) {
+      return res.status(400).json({ success: false, error: 'Enter a valid email address.' });
+    }
+
+    const existing = await BlogSubscriberModel.findOne({ email: normalized });
+
+    if (existing && existing.status === 'active') {
+      return res.json({ success: true, code: 'ALREADY_SUBSCRIBED', message: "You're already subscribed to the STAROX Blog." });
+    }
+
+    if (existing && existing.status === 'unsubscribed') {
+      existing.status = 'active';
+      existing.subscribedAt = new Date();
+      existing.unsubscribedAt = undefined;
+      await existing.save();
+      return res.json({ success: true, code: 'SUBSCRIBED', message: "You're subscribed. We'll email you when a new post is published." });
+    }
+
+    try {
+      await BlogSubscriberModel.create({
+        email: normalized,
+        status: 'active',
+        subscribedAt: new Date(),
+        unsubscribeToken: crypto.randomBytes(24).toString('base64url'),
+      });
+    } catch (createErr: any) {
+      // Race: another concurrent request created the same normalized email
+      // between our findOne and this create. Treat it the same as
+      // "already subscribed" rather than surfacing a raw duplicate-key error.
+      if (createErr?.code === 11000) {
+        return res.json({ success: true, code: 'ALREADY_SUBSCRIBED', message: "You're already subscribed to the STAROX Blog." });
+      }
+      throw createErr;
+    }
+
+    return res.json({ success: true, code: 'SUBSCRIBED', message: "You're subscribed. We'll email you when a new post is published." });
+  } catch (error) {
+    console.error('[Blog Subscribe] Error:', error);
+    return res.status(500).json({ success: false, error: "Couldn't subscribe right now. Please try again." });
+  }
+});
+
+// Unsubscribe by opaque token only — never by email, so this link can
+// never be used to enumerate or target an arbitrary address. Idempotent:
+// safe to click/POST more than once.
+blogRouter.post('/blogs/unsubscribe/:token', async (req, res) => {
+  try {
+    const sub = await BlogSubscriberModel.findOne({ unsubscribeToken: req.params.token });
+    if (!sub) {
+      return res.status(404).json({ success: false, error: 'This unsubscribe link is invalid or has expired.' });
+    }
+    if (sub.status === 'active') {
+      sub.status = 'unsubscribed';
+      sub.unsubscribedAt = new Date();
+      await sub.save();
+    }
+    return res.json({ success: true, message: "You're unsubscribed from the STAROX Blog." });
+  } catch (error) {
+    console.error('[Blog Unsubscribe] Error:', error);
+    return res.status(500).json({ success: false, error: "Couldn't process that right now. Please try again." });
+  }
+});
+
+// Same token as the unsubscribe link — lets the "Resubscribe" button on the
+// unsubscribe confirmation page work without asking for the email again.
+blogRouter.post('/blogs/resubscribe/:token', async (req, res) => {
+  try {
+    const sub = await BlogSubscriberModel.findOne({ unsubscribeToken: req.params.token });
+    if (!sub) {
+      return res.status(404).json({ success: false, error: 'This link is invalid or has expired.' });
+    }
+    if (sub.status === 'unsubscribed') {
+      sub.status = 'active';
+      sub.subscribedAt = new Date();
+      sub.unsubscribedAt = undefined;
+      await sub.save();
+    }
+    return res.json({ success: true, message: "You're subscribed. We'll email you when a new post is published." });
+  } catch (error) {
+    console.error('[Blog Resubscribe] Error:', error);
+    return res.status(500).json({ success: false, error: "Couldn't process that right now. Please try again." });
+  }
+});
+
+// ==========================================
+// ADMIN BLOG SUBSCRIBERS (Admin-only)
+// ==========================================
+
+blogRouter.get('/admin/blog-subscribers', authMiddleware, adminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const skip = (page - 1) * limit;
+
+    const [total, active, unsubscribed, subscribers] = await Promise.all([
+      BlogSubscriberModel.countDocuments(),
+      BlogSubscriberModel.countDocuments({ status: 'active' }),
+      BlogSubscriberModel.countDocuments({ status: 'unsubscribed' }),
+      BlogSubscriberModel.find().sort({ subscribedAt: -1 }).skip(skip).limit(limit).select('email status subscribedAt unsubscribedAt'),
+    ]);
+
+    return res.json({
+      summary: { total, active, unsubscribed },
+      subscribers,
+      page,
+      pages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error('[Admin Blog Subscribers] Query failed:', error);
+    return res.status(500).json({ error: 'Failed to fetch blog subscribers' });
+  }
+});
+
+blogRouter.post('/admin/blog-subscribers/:id/unsubscribe', authMiddleware, adminMiddleware, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const sub = await BlogSubscriberModel.findById(req.params.id);
+    if (!sub) return res.status(404).json({ error: 'Subscriber not found' });
+    sub.status = 'unsubscribed';
+    sub.unsubscribedAt = new Date();
+    await sub.save();
+    return res.json({ success: true, data: sub });
+  } catch (error) {
+    console.error('[Admin Blog Subscribers] Unsubscribe failed:', error);
+    return res.status(500).json({ error: 'Failed to unsubscribe subscriber' });
   }
 });

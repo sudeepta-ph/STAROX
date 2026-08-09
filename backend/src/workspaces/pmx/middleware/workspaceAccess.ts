@@ -1,10 +1,21 @@
 import { Response, NextFunction } from "express";
 import { AuthenticatedRequest } from "../../../middleware/auth";
-import { PmxWorkspaceMemberModel, PmxUnderstandingModel } from "../../../models/Pmx";
+import { PmxWorkspaceMemberModel, PmxUnderstandingModel, PmxWorkspaceRole } from "../../../models/Pmx";
 
-export type WorkspaceRole = "owner" | "admin" | "member";
+export type WorkspaceRole = PmxWorkspaceRole;
 
-const RANK: Record<WorkspaceRole, number> = { member: 0, admin: 1, owner: 2 };
+// Access-level ranking, used for the minRole gate (member/admin/owner
+// routes). Every named role besides owner/admin (member, product_manager,
+// engineering, designer, qa, marketing, sales, support, viewer) ranks
+// alongside plain "member" here — they all have *access* to the workspace.
+// Whether a role can *write* is a separate axis, see canWrite() below —
+// deliberately not folded into this rank, since "viewer" needs the same
+// access rank as everyone else but zero write permission.
+const RANK: Record<WorkspaceRole, number> = {
+  member: 0, product_manager: 0, engineering: 0, designer: 0, qa: 0,
+  marketing: 0, sales: 0, support: 0, viewer: 0,
+  admin: 1, owner: 2,
+};
 
 export interface WorkspaceScopedRequest extends AuthenticatedRequest {
   workspaceRole?: WorkspaceRole;
@@ -13,6 +24,14 @@ export interface WorkspaceScopedRequest extends AuthenticatedRequest {
 export async function getMemberRole(projectId: string, userId: string): Promise<WorkspaceRole | null> {
   const row = await PmxWorkspaceMemberModel.findOne({ projectId, userId }, { role: 1 });
   return (row?.role as WorkspaceRole | undefined) ?? null;
+}
+
+// The one centrally-enforced write restriction for this pass: Viewer is
+// read-only, everywhere, full stop. Every other non-owner/admin role
+// (including plain "member") gets standard read-write access — per-section
+// scoping between those roles is a deliberate later pass, not this one.
+export function canWrite(role: WorkspaceRole | null): boolean {
+  return !!role && role !== "viewer";
 }
 
 // Express middleware factory — resolves projectId from params/query/body,
@@ -50,6 +69,9 @@ export function requireWorkspaceAccess(minRole: WorkspaceRole = "member") {
       if (role) {
         if (RANK[role] < RANK[minRole]) {
           return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
+        }
+        if (req.method !== "GET" && !canWrite(role)) {
+          return res.status(403).json({ success: false, error: "Viewers have read-only access to this workspace." });
         }
         req.workspaceRole = role;
         return next();

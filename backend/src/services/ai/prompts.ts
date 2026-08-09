@@ -682,6 +682,18 @@ const ARTIFACT_TYPE_BRIEF: Record<string, string> = {
   technical_spec: "a Technical Architecture Specification: system design summary, stack/architecture rationale, API structure, data model / schema changes, security notes, and edge cases",
   sprint_plan: "a Sprint Execution Plan: tasks grouped by sprint/category (frontend, backend, infra, testing, deployment), with priority, estimate, and assignee where known",
   roadmap: "a Strategic Product Roadmap: value proposition, target personas, phased milestones (now / next / later), and the key risks or bets each phase depends on",
+  // Execution-plan-generated artifact types (see routes/pmx.ts generateArtifactsForPlan):
+  architecture_summary: "an Architecture Summary: system components, how they interact, chosen stack and why, and the key scaling/reliability considerations",
+  api_contract: "an API Contract: endpoints grouped by resource, method/path, request/response shapes, and auth requirements — as a reference table plus example payloads",
+  database_schema: "a Database Schema doc: collections/tables, fields with types, relationships, and any migration notes for existing data",
+  ui_specification: "a UI Specification: screen-by-screen breakdown, key components per screen, states (empty/loading/error), and interaction notes",
+  component_inventory: "a Component Inventory: reusable UI components needed, their props/variants, and which screens consume them",
+  test_plan: "a Test Plan: test strategy, coverage areas (unit/integration/regression), critical user flows to verify, and edge cases to check before release",
+  release_checklist: "a Release Checklist: pre-release verification steps, rollback plan, and sign-off criteria, as a checklist",
+  launch_plan: "a Launch Plan: positioning, messaging pillars, launch timeline, and channels/owners for the release",
+  newsletter_draft: "a Newsletter Draft announcing this release: subject line, a short punchy body, and a clear call to action",
+  faq: "a Frequently Asked Questions doc for this feature: the questions users/support will actually ask, with concise answers",
+  help_center_outline: "a Help Center Outline: article titles and a one-line summary of what each should cover, organized by topic",
 };
 
 export function getCompileArtifactPrompt(docType: string, title: string, context: string): string {
@@ -726,5 +738,213 @@ Return exactly this JSON schema (and nothing else):
       "dependencies": ["string (titles of dependent tasks)"]
     }
   ]
+}`;
+}
+
+// ── PMX: Execution Plan — department detection & scaffold ────────────────────
+// First call of the "Create Execution"/"Regenerate Execution" pipeline
+// (backend/src/services/pmxAi.ts generateExecutionScaffold). Reads scope
+// off the PRD and decides which departments are actually required — never
+// all of them by default — then lays out milestones and a sprint plan. Task
+// generation (getDepartmentTasksPrompt) runs per detected department off of
+// this scaffold's milestones/sprints, so those two must stay in the same
+// vocabulary (task.milestone must equal one of these milestone names).
+const PMX_DEPARTMENTS_LIST = "Product, Design, Engineering, QA, DevOps, Security, Marketing, Sales, Customer Success, Support, Leadership";
+
+export function getExecutionScaffoldPrompt(prd: string, techSpecs: string): string {
+  return `You are a Technical Program Manager turning an approved PRD into an execution plan skeleton — the department/milestone/sprint scaffold that individual department task lists will be generated against next. You are not writing tasks yet.
+
+PRD:
+${prd.substring(0, 6000)}
+
+Technical Specs:
+${(techSpecs || "").substring(0, 3000)}
+
+Step 1 — Detect scope and required departments. Choose only from this fixed list: ${PMX_DEPARTMENTS_LIST}. Do NOT include a department the work doesn't actually need — judge scope the way a TPM would:
+- A narrow engineering-only change (e.g. an internal API, a backend migration) → just Engineering (add QA only if it clearly needs dedicated test coverage beyond the engineer's own testing).
+- A UX-heavy feature (new user-facing flow/screen) → Design, Engineering, QA.
+- A full product launch (new product/major feature going to market) → Product, Design, Engineering, QA, Marketing, Sales, Customer Success, Support, Leadership.
+- Enterprise/infrastructure work (auth overhaul, compliance, platform migration) → Product, Engineering, DevOps, Security, QA, Leadership.
+Use these as calibration, not a rigid lookup — infer from what the PRD actually describes.
+
+Step 2 — Define milestones (typically 3-6, fewer for narrow scope): named checkpoints the selected departments' work rolls up to, in order, each with a one-sentence goal (e.g. "Engineering MVP" — core flows implemented and demoable).
+
+Step 3 — Define a sprint plan (1-2 weeks per sprint, typically 2-5 sprints depending on scope): which departments are active each sprint and what that sprint is focused on. Departments should generally onboard in a sensible order (e.g. Product/Design before Engineering ramps, QA overlapping the tail of Engineering, Marketing/Sales/Support/Leadership clustering near launch) — not everyone active in every sprint.
+
+Return exactly this JSON schema (and nothing else):
+{
+  "scopeSummary": "string — 2-3 sentences on what's being built and why these departments/this shape of plan fits it",
+  "departments": ["string — subset of: ${PMX_DEPARTMENTS_LIST}"],
+  "milestones": [
+    { "name": "string", "order": "number (1-based)", "goal": "string — one sentence" }
+  ],
+  "sprints": [
+    { "number": "number (1-based)", "label": "string, e.g. Sprint 1", "departments": ["string"], "focus": "string — one sentence" }
+  ]
+}`;
+}
+
+// ── PMX: Custom Execution — scaffold (no PRD, no department detection) ──────
+// Powers a custom execution's scaffold step: unlike getExecutionScaffoldPrompt,
+// departments are already fixed by the user's own selection (not detected),
+// so this prompt's only job is producing milestones/sprints scoped to just
+// those departments — keeping the board's existing milestone-grouping and
+// Sprint Health logic working identically for PRD and custom executions.
+export function getCustomExecutionScaffoldPrompt(name: string, goal: string, description: string, departments: string[]): string {
+  return `You are a Technical Program Manager laying out the milestone/sprint skeleton for a focused, non-PRD execution — a specific outcome someone wants done, not a full product plan. The departments involved are already decided; do not add, remove, or second-guess them.
+
+Execution name: "${name}"
+Goal: ${goal}
+${description ? `Additional context: ${description}\n` : ""}
+Departments involved: ${departments.join(", ")}
+
+Step 1 — Define milestones: typically 1-3 for a focused execution like this (don't over-scaffold a small, single-outcome effort), each a named checkpoint the involved departments' work rolls up to, in order, with a one-sentence goal.
+
+Step 2 — Define a sprint plan (1-2 weeks per sprint, typically 1-3 sprints for this scope): which of the given departments are active each sprint and what that sprint is focused on. Every sprint's "departments" must be a subset of exactly: ${departments.join(", ")}.
+
+Return exactly this JSON schema (and nothing else):
+{
+  "scopeSummary": "string — 1-2 sentences on what this execution accomplishes",
+  "milestones": [
+    { "name": "string", "order": "number (1-based)", "goal": "string — one sentence" }
+  ],
+  "sprints": [
+    { "number": "number (1-based)", "label": "string, e.g. Sprint 1", "departments": ["string — subset of the given departments"], "focus": "string — one sentence" }
+  ]
+}`;
+}
+
+// ── PMX: Execution Plan — per-department task generation ─────────────────────
+// Second call of the pipeline, run once per department returned by the
+// scaffold (parallel fan-out in routes/pmx.ts POST /execution/generate).
+// Bounded to one department's tasks so output stays realistic in size and
+// quality instead of one giant call trying to cover the whole backlog.
+const PMX_DEPARTMENT_TASK_MENUS: Record<string, string> = {
+  Product: "Finalize scope, define milestones, approve requirements, stakeholder review",
+  Design: "User flows, wireframes, high-fidelity UI, design system updates, accessibility review",
+  Engineering: "Frontend implementation, backend implementation, API development, database migrations, integrations, performance optimization, security hardening",
+  QA: "Test strategy, unit testing, integration testing, regression testing, release validation",
+  DevOps: "CI/CD, environment setup, monitoring, deployment automation",
+  Security: "Threat modeling, access-control review, dependency/vulnerability audit, security sign-off",
+  Marketing: "Positioning, messaging, landing page, newsletter, launch campaign",
+  Sales: "Demo material, rollout plan, pricing/packaging alignment, sales enablement",
+  "Customer Success": "Customer onboarding, rollout plan, feedback collection, success playbook",
+  Support: "Help documentation, FAQ, troubleshooting guides, support macros",
+  Leadership: "Executive review, budget approval, launch readiness, risk assessment",
+};
+
+export function getDepartmentTasksPrompt(
+  department: string,
+  prd: string,
+  techSpecs: string,
+  milestones: Array<{ name: string; goal: string }>,
+  sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>,
+  scopeSummary: string
+): string {
+  const relevantSprints = sprints.filter(s => s.departments.includes(department));
+  return `You are the ${department} lead writing this department's sprint backlog for an approved PRD, the way a senior Product Manager / Engineering Manager / Design Lead / QA Lead / GTM Lead actually writes tickets — concrete, dependency-aware, immediately actionable. Avoid generic AI-slop tasks ("Improve the UI", "Test everything") — every task should read like it was written by someone who has actually scoped this work.
+
+Plan context: ${scopeSummary}
+
+PRD:
+${prd.substring(0, 5000)}
+
+Technical Specs:
+${(techSpecs || "").substring(0, 2500)}
+
+Milestones this plan is organized around (each task's "milestone" field must exactly match one of these names):
+${milestones.map(m => `- ${m.name}: ${m.goal}`).join("\n")}
+
+Sprints where ${department} is active (each task's "sprintNumber" must be one of these numbers):
+${relevantSprints.length ? relevantSprints.map(s => `- Sprint ${s.number} (${s.label}): ${s.focus}`).join("\n") : sprints.map(s => `- Sprint ${s.number} (${s.label}): ${s.focus}`).join("\n")}
+
+Typical ${department} work to draw from (adapt to what this PRD actually needs, don't force all of these in): ${PMX_DEPARTMENT_TASK_MENUS[department] || "work directly relevant to this PRD"}.
+
+Generate ${department}'s tasks for this plan (typically 4-10, scaled to actual scope — don't pad). For each task:
+- "dependencies": titles of other tasks (in this or another department) that must complete first, or a milestone-gate label (e.g. "API Contract Approved", "Design Handoff Complete") if the dependency isn't a specific ticket.
+- "acceptanceCriteria": 2-5 concrete, checkable bullets — what "done" means, not restated description.
+- "implementationNotes": 1-3 sentences of real guidance (approach, gotcha, or key decision) — skip if genuinely nothing useful to add, but don't leave it generic filler.
+- "prdSectionLink": the PRD heading/section this task traces back to.
+- "dueWeek": the 1-based week number within the overall plan this should land by (weeks are ~1:1 with sprint number unless the task spans longer).
+
+Return exactly this JSON schema (and nothing else):
+{
+  "tasks": [
+    {
+      "title": "string",
+      "description": "string — 1-3 sentences, what to actually do",
+      "type": "frontend | backend | infra | testing | deployment | ux | other",
+      "milestone": "string — must match one of the milestone names above",
+      "sprintNumber": "number",
+      "priority": "high | medium | low",
+      "timeEstimate": "string, e.g. 4h, 2d, 3d",
+      "assignee": "string — suggested owner role, e.g. Backend Engineer, Design Lead, QA Engineer",
+      "dueWeek": "number",
+      "prdSectionLink": "string",
+      "dependencies": ["string"],
+      "acceptanceCriteria": ["string"],
+      "implementationNotes": "string"
+    }
+  ]
+}`;
+}
+
+// ── PMX: Execution Plan — regeneration diff ───────────────────────────────────
+// Third call, used only by POST /execution/regenerate. Given the latest PRD
+// plus the current plan/tasks, decides what changed. Tasks already marked
+// "done" are still shown for context (so the model doesn't recreate them)
+// but the route hard-filters them out of update/remove before applying the
+// diff regardless of what the model returns — completed work is never
+// touched by regeneration.
+export function getExecutionDiffPrompt(
+  prd: string,
+  techSpecs: string,
+  currentDepartments: string[],
+  currentMilestones: Array<{ name: string; goal: string }>,
+  currentSprints: Array<{ number: number; label: string; departments: string[]; focus: string }>,
+  existingTasksJson: string
+): string {
+  return `The PRD for this execution plan has changed. Reconcile the existing sprint backlog against the updated PRD — the way a TPM re-plans mid-sprint, not a full rewrite.
+
+Updated PRD:
+${prd.substring(0, 6000)}
+
+Technical Specs:
+${(techSpecs || "").substring(0, 2500)}
+
+Current departments: ${currentDepartments.join(", ")}
+Current milestones: ${currentMilestones.map(m => `${m.name} — ${m.goal}`).join("; ")}
+Current sprints: ${currentSprints.map(s => `Sprint ${s.number} (${s.label}): ${s.focus}`).join("; ")}
+
+Existing tasks (each has a real "_id" — reference it exactly in your diff; tasks with status "done" are shown for context only, never propose updating or removing them):
+${existingTasksJson}
+
+Rules:
+1. Preserve completed work — never touch a task whose status is "done".
+2. Update tasks whose scope actually changed because of the PRD change; leave everything else alone.
+3. Remove tasks that are now obsolete (not status "done").
+4. Add newly-required tasks the PRD change introduces, following the same field shape as an existing task (including milestone/sprintNumber matched to the — possibly revised — milestones/sprints below).
+5. Do NOT duplicate an existing task under a new title — if it already exists, that's an update, not an add.
+6. Departments/milestones/sprints below may be the same as current, or adjusted if the PRD change requires it (e.g. a newly-needed department).
+
+Return exactly this JSON schema (and nothing else):
+{
+  "departments": ["string"],
+  "milestones": [{ "name": "string", "order": "number", "goal": "string" }],
+  "sprints": [{ "number": "number", "label": "string", "departments": ["string"], "focus": "string" }],
+  "diff": {
+    "add": [
+      {
+        "title": "string", "description": "string", "type": "frontend | backend | infra | testing | deployment | ux | other",
+        "department": "string", "milestone": "string", "sprintNumber": "number", "priority": "high | medium | low",
+        "timeEstimate": "string", "assignee": "string", "dueWeek": "number", "prdSectionLink": "string",
+        "dependencies": ["string"], "acceptanceCriteria": ["string"], "implementationNotes": "string"
+      }
+    ],
+    "update": [
+      { "matchId": "string — the _id of the existing task being changed", "changes": { "any of the task fields above that changed": "new value" }, "reason": "string — one sentence" }
+    ],
+    "remove": ["string — _id of an obsolete existing task"]
+  }
 }`;
 }

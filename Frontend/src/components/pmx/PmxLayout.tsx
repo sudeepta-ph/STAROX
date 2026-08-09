@@ -208,6 +208,12 @@ export default function PmxLayout() {
                 AI is compiling product intelligence...
               </span>
             )}
+            {loading.executionGenerate && (
+              <span className="flex items-center gap-1.5 text-xs text-primary animate-pulse bg-primary/5 border border-primary/10 px-3 py-1 rounded-full">
+                <div className="h-1.5 w-1.5 rounded-full bg-primary animate-ping" />
+                AI is building your execution plan...
+              </span>
+            )}
             <div className="h-4 w-px bg-border" />
             <Link
               to="/pmx/docs"

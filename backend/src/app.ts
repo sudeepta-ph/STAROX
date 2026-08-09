@@ -16,10 +16,20 @@ import { blogRouter } from "./api/routes/blogRoutes.js";
 import { contactRouter } from "./api/routes/contact";
 import { pmxRouter } from "./workspaces/pmx/routes/pmx";
 import { pmxInviteRouter } from "./api/routes/pmxInvite";
+import { pmxEmailInviteRouter } from "./api/routes/pmxEmailInvite";
 import { errorHandler } from "./middleware/errorHandler";
 
 export const app = express();
-app.set("trust proxy", true);
+// "true" trusts every hop in X-Forwarded-For, including a value the client
+// sent itself — express-rate-limit correctly refuses to run with that
+// (ERR_ERL_PERMISSIVE_TRUST_PROXY), since it lets anyone spoof req.ip and
+// bypass every IP-based limiter in this app. Locally there's no reverse
+// proxy at all, so `false` (use the real socket address) is exactly
+// correct; in production this app sits behind exactly one hop (Vercel's
+// edge network / a single load balancer in front of the Docker image), so
+// trusting exactly one hop is the standard safe value — see
+// https://express-rate-limit.github.io/ERR_ERL_PERMISSIVE_TRUST_PROXY/
+app.set("trust proxy", env.NODE_ENV === "production" ? 1 : false);
 
 const allowedOrigins = [
   env.FRONTEND_ORIGIN,
@@ -55,6 +65,7 @@ app.use("/api", blogRouter);
 app.use("/api", contactRouter);
 app.use("/api/pmx", pmxRouter);
 app.use("/api/pmx-invite", pmxInviteRouter);
+app.use("/api/pmx-invite-email", pmxEmailInviteRouter);
 app.use("/", proxyRouter);
 
 app.use(errorHandler);

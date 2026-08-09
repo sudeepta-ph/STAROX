@@ -89,6 +89,13 @@ export interface IPmxUnderstanding extends Document {
   aiSettings: {
     autoAnalysis: boolean;
   };
+  // Billing state — "trial" until an owner/admin's upgrade takes effect.
+  // Trial start/end are NOT stored here; they're derived from createdAt
+  // (see getWorkspacePlanStatus in services/pmxUsage.ts) so an old,
+  // already-persisted workspace can never be granted a fresh trial window
+  // just by being read after this field shipped.
+  plan: "trial" | "active";
+  upgradeRequestedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -150,6 +157,8 @@ const PmxUnderstandingSchema = new Schema<IPmxUnderstanding>(
     aiSettings: {
       autoAnalysis: { type: Boolean, default: false },
     },
+    plan: { type: String, enum: ["trial", "active"], default: "trial" },
+    upgradeRequestedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -163,10 +172,47 @@ export const PmxUnderstandingModel = mongoose.model<IPmxUnderstanding>("PmxUnder
 // every PMX collection now — see requireWorkspaceAccess/getMemberRole in
 // workspaces/pmx/middleware/workspaceAccess.ts. The `userId` field on other
 // PMX documents remains creator/actor provenance only, not an access filter.
+//
+// "member" is kept for backward compatibility (existing rows, and the
+// legacy /invite/:token/accept link) but new invite codes grant one of the
+// named roles below instead — see PMX_INVITE_ROLES. Every non-owner/admin
+// role (including plain "member") gets standard read-write access for now;
+// "viewer" is the one role with a hard, centrally-enforced restriction (see
+// assertCanWrite in workspaceAccess.ts) — read-only, everywhere. Per-section
+// write scoping between the other named roles (e.g. Engineering vs PRD) is
+// a deliberately separate, later pass.
+export const PMX_WORKSPACE_ROLES = [
+  "owner", "admin", "member",
+  "product_manager", "engineering", "designer", "qa", "marketing", "sales", "support", "viewer",
+] as const;
+export type PmxWorkspaceRole = typeof PMX_WORKSPACE_ROLES[number];
+
+// Roles an invite code may grant — everything except "owner" (never
+// invite-granted) and the legacy generic "member" (new codes always pick a
+// named role now; "member" only still exists on old rows/the legacy link).
+export const PMX_INVITE_ROLES = [
+  "admin", "member", "product_manager", "engineering", "designer", "qa", "marketing", "sales", "support", "viewer",
+] as const;
+export type PmxInviteRole = typeof PMX_INVITE_ROLES[number];
+
+export const PMX_ROLE_LABELS: Record<PmxWorkspaceRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+  product_manager: "Product Manager",
+  engineering: "Engineering",
+  designer: "Designer",
+  qa: "QA",
+  marketing: "Marketing",
+  sales: "Sales",
+  support: "Support",
+  viewer: "Viewer",
+};
+
 export interface IPmxWorkspaceMember extends Document {
   projectId: string;
   userId: string; // Clerk id
-  role: "owner" | "admin" | "member";
+  role: PmxWorkspaceRole;
   invitedBy?: string;
   joinedAt: Date;
   createdAt: Date;
@@ -177,7 +223,7 @@ const PmxWorkspaceMemberSchema = new Schema<IPmxWorkspaceMember>(
   {
     projectId: { type: String, required: true, index: true },
     userId: { type: String, required: true, index: true },
-    role: { type: String, enum: ["owner", "admin", "member"], required: true },
+    role: { type: String, enum: PMX_WORKSPACE_ROLES, required: true },
     invitedBy: { type: String },
     joinedAt: { type: Date, default: Date.now },
   },
@@ -225,15 +271,17 @@ export const PmxWorkspaceInviteModel = mongoose.model<IPmxWorkspaceInvite>("PmxW
 // Current invite mechanism — a short human-enterable code (XXXX-XXXX)
 // instead of a link. Only `codeHash` (sha256 of the normalized code) is
 // stored, never the plaintext — the plaintext is generated, returned once
-// in the generate/regenerate response, and never persisted server-side.
-// One active (non-revoked) code per workspace at a time, same "standing,
-// regenerable" shape as the legacy invite link. `role` is hard-pinned to
-// "member" for the same reason.
+// in the generate response, and never persisted server-side.
+// Multiple simultaneous, independently revocable codes per workspace are
+// supported (e.g. an "Engineering Invite" and a "Marketing Invite" coexist)
+// — `label` distinguishes them in the Settings UI, and `role` is whatever
+// the creator picked from PMX_INVITE_ROLES, granted to whoever redeems it.
 export interface IPmxWorkspaceInviteCode extends Document {
   projectId: string;
   codeHash: string;
   createdBy: string;
-  role: "member";
+  label?: string;
+  role: PmxInviteRole;
   expiresAt: Date | null;
   maxUses: number | null;
   usageCount: number;
@@ -248,7 +296,8 @@ const PmxWorkspaceInviteCodeSchema = new Schema<IPmxWorkspaceInviteCode>(
     projectId: { type: String, required: true, index: true },
     codeHash: { type: String, required: true, unique: true, index: true },
     createdBy: { type: String, required: true },
-    role: { type: String, enum: ["member"], default: "member" },
+    label: { type: String },
+    role: { type: String, enum: PMX_INVITE_ROLES, required: true },
     expiresAt: { type: Date, default: null },
     maxUses: { type: Number, default: null },
     usageCount: { type: Number, default: 0 },
@@ -259,6 +308,53 @@ const PmxWorkspaceInviteCodeSchema = new Schema<IPmxWorkspaceInviteCode>(
 );
 
 export const PmxWorkspaceInviteCodeModel = mongoose.model<IPmxWorkspaceInviteCode>("PmxWorkspaceInviteCode", PmxWorkspaceInviteCodeSchema);
+
+// ==========================================
+// 2E. WORKSPACE EMAIL INVITE MODEL
+// ==========================================
+// The second, complementary way to add people (alongside the anonymous,
+// shareable PmxWorkspaceInviteCodeModel above): bound to one specific email
+// address, so only that identity can accept it. `token` is a long,
+// cryptographically random opaque string used in the accept link
+// (/pmx/invite/<token>) — stored in plaintext like the legacy
+// PmxWorkspaceInviteModel.token, not hashed like the short human-typed
+// codes, since it isn't brute-forceable the way an 8-character code is.
+export interface IPmxWorkspaceEmailInvite extends Document {
+  projectId: string;
+  email: string; // lowercased/trimmed
+  role: PmxInviteRole;
+  token: string;
+  invitedBy: string; // Clerk id
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expiresAt: Date;
+  acceptedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PmxWorkspaceEmailInviteSchema = new Schema<IPmxWorkspaceEmailInvite>(
+  {
+    projectId: { type: String, required: true, index: true },
+    email: { type: String, required: true, index: true },
+    role: { type: String, enum: PMX_INVITE_ROLES, required: true },
+    token: { type: String, required: true, unique: true, index: true },
+    invitedBy: { type: String, required: true },
+    status: { type: String, enum: ["pending", "accepted", "revoked", "expired"], default: "pending", index: true },
+    expiresAt: { type: Date, required: true },
+    acceptedAt: { type: Date, default: null },
+  },
+  { timestamps: true }
+);
+// One active (pending) invitation per email per workspace — the DB-level
+// half of "prevent duplicate active invitations for the same email/
+// workspace combination" (the route also pre-checks and returns a friendlier
+// message before ever hitting this constraint).
+PmxWorkspaceEmailInviteSchema.index(
+  { projectId: 1, email: 1 },
+  { unique: true, partialFilterExpression: { status: "pending" } }
+);
+
+export const PmxWorkspaceEmailInviteModel = mongoose.model<IPmxWorkspaceEmailInvite>("PmxWorkspaceEmailInvite", PmxWorkspaceEmailInviteSchema);
 
 // ==========================================
 // 3. EVIDENCE MODEL (Stage 3)
@@ -602,20 +698,39 @@ export const PmxSolutionModel = mongoose.model<IPmxSolution>("PmxSolution", PmxS
 // ==========================================
 // 9. EXECUTION TICKET MODEL (Stage 9)
 // ==========================================
+export const PMX_DEPARTMENTS = [
+  "Product", "Design", "Engineering", "QA", "DevOps", "Security",
+  "Marketing", "Sales", "Customer Success", "Support", "Leadership",
+] as const;
+export type PmxDepartment = typeof PMX_DEPARTMENTS[number];
+
 export interface IPmxExecutionTask extends Document {
   projectId: string;
   userId: string;
   solutionId?: string;
   ideaPrdId?: string;
+  planId?: string;
   title: string;
   description: string;
-  type: "frontend" | "backend" | "infra" | "testing" | "deployment" | "ux";
+  type: "frontend" | "backend" | "infra" | "testing" | "deployment" | "ux" | "other";
+  department: PmxDepartment;
   sprintPlan: string; // e.g. Sprint 1
+  sprintNumber?: number;
+  milestone?: string;
+  milestoneOrder?: number;
   priority: "high" | "medium" | "low";
   status: "todo" | "in_progress" | "review" | "done";
   timeEstimate: string; // e.g. "2h", "1d", "3d"
-  assignee?: string;
-  dependencies: string[];
+  assignee?: string; // doubles as "suggested owner role", e.g. "Backend Engineer"
+  dueWeek?: number;
+  dueDate?: Date;
+  prdSectionLink?: string;
+  acceptanceCriteria: string[];
+  implementationNotes?: string;
+  dependencies: string[]; // human-readable dependency titles
+  dependencyTaskIds: string[]; // resolved task _ids, for graph/Gantt use
+  diffStatus?: "added" | "updated";
+  diffSummary?: string;
   sourceInputIds?: string[];
   isDeleted: boolean;
   createdAt: Date;
@@ -628,20 +743,33 @@ const PmxExecutionTaskSchema = new Schema<IPmxExecutionTask>(
     userId: { type: String, required: true, index: true },
     solutionId: { type: String },
     ideaPrdId: { type: String },
+    planId: { type: String },
     title: { type: String, required: true },
     description: { type: String, required: true },
     type: {
       type: String,
-      enum: ["frontend", "backend", "infra", "testing", "deployment", "ux"],
+      enum: ["frontend", "backend", "infra", "testing", "deployment", "ux", "other"],
       required: true,
       index: true,
     },
+    department: { type: String, enum: PMX_DEPARTMENTS, default: "Engineering", index: true },
     sprintPlan: { type: String, default: "Backlog" },
+    sprintNumber: { type: Number },
+    milestone: { type: String },
+    milestoneOrder: { type: Number },
     priority: { type: String, enum: ["high", "medium", "low"], default: "medium" },
     status: { type: String, enum: ["todo", "in_progress", "review", "done"], default: "todo" },
     timeEstimate: { type: String, default: "1d" },
     assignee: { type: String },
+    dueWeek: { type: Number },
+    dueDate: { type: Date },
+    prdSectionLink: { type: String },
+    acceptanceCriteria: [{ type: String }],
+    implementationNotes: { type: String },
     dependencies: [{ type: String }],
+    dependencyTaskIds: [{ type: String }],
+    diffStatus: { type: String, enum: ["added", "updated"] },
+    diffSummary: { type: String },
     sourceInputIds: [{ type: String }],
     isDeleted: { type: Boolean, default: false },
   },
@@ -651,13 +779,139 @@ const PmxExecutionTaskSchema = new Schema<IPmxExecutionTask>(
 export const PmxExecutionTaskModel = mongoose.model<IPmxExecutionTask>("PmxExecutionTask", PmxExecutionTaskSchema);
 
 // ==========================================
+// 9B. EXECUTION PLAN MODEL
+// ==========================================
+// One evolving doc per projectId — the record of the latest "Create
+// Execution"/"Regenerate Execution" run. Mirrors the versioned-doc-with-
+// history pattern used by PmxUnderstanding/PmxSolution. Drives the
+// Execution board's metrics/milestone/sprint grouping and the "PRD changed
+// since last generation" staleness check (compare sourcePrdVersion to the
+// live PmxSolution/PmxIdeaPrd .version).
+export interface IPmxExecutionPlan extends Document {
+  projectId: string;
+  userId: string;
+  // "prd" (default — see the schema field below) covers every plan created
+  // before custom executions existed; "custom" plans have no PRD source and
+  // instead carry name/goal/description directly.
+  type: "prd" | "custom";
+  sourceType?: "solution" | "ideaPrd";
+  sourceId?: string;
+  sourcePrdVersion?: number;
+  name?: string;
+  goal?: string;
+  description?: string;
+  departments: string[];
+  milestones: Array<{ name: string; order: number; goal: string }>;
+  sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>;
+  startDate: Date;
+  status: "generating" | "completed" | "failed";
+  artifactsStatus: "pending" | "generating" | "completed" | "partial_failed";
+  artifactJobs: Array<{ type: string; department: string; title: string; status: "pending" | "done" | "failed" }>;
+  version: number;
+  history: Array<{
+    version: number;
+    departments: string[];
+    milestones: Array<{ name: string; order: number; goal: string }>;
+    sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>;
+    changedAt: Date;
+  }>;
+  isDeleted: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PmxExecutionPlanSchema = new Schema<IPmxExecutionPlan>(
+  {
+    projectId: { type: String, required: true, index: true },
+    userId: { type: String, required: true, index: true },
+    // default: "prd" — applied by Mongoose to any already-persisted plan
+    // document that predates this field (every plan before custom
+    // executions existed always had a real sourceType), so existing data
+    // reads back correctly with no migration write needed.
+    type: { type: String, enum: ["prd", "custom"], default: "prd" },
+    sourceType: { type: String, enum: ["solution", "ideaPrd"] },
+    sourceId: { type: String },
+    sourcePrdVersion: { type: Number },
+    name: { type: String },
+    goal: { type: String },
+    description: { type: String },
+    departments: [{ type: String }],
+    milestones: [
+      {
+        name: { type: String },
+        order: { type: Number },
+        goal: { type: String },
+      },
+    ],
+    sprints: [
+      {
+        number: { type: Number },
+        label: { type: String },
+        departments: [{ type: String }],
+        focus: { type: String },
+      },
+    ],
+    startDate: { type: Date, default: Date.now },
+    status: { type: String, enum: ["generating", "completed", "failed"], default: "generating" },
+    artifactsStatus: { type: String, enum: ["pending", "generating", "completed", "partial_failed"], default: "pending" },
+    artifactJobs: [
+      {
+        type: { type: String },
+        department: { type: String },
+        title: { type: String },
+        status: { type: String, enum: ["pending", "done", "failed"], default: "pending" },
+      },
+    ],
+    version: { type: Number, default: 1 },
+    history: [
+      {
+        version: { type: Number },
+        departments: [{ type: String }],
+        milestones: [
+          {
+            name: { type: String },
+            order: { type: Number },
+            goal: { type: String },
+          },
+        ],
+        sprints: [
+          {
+            number: { type: Number },
+            label: { type: String },
+            departments: [{ type: String }],
+            focus: { type: String },
+          },
+        ],
+        changedAt: { type: Date, default: Date.now },
+      },
+    ],
+    isDeleted: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
+export const PmxExecutionPlanModel = mongoose.model<IPmxExecutionPlan>("PmxExecutionPlan", PmxExecutionPlanSchema);
+
+// ==========================================
 // 10. ARTIFACTS STORAGE MODEL (Stage 10)
 // ==========================================
+export const PMX_ARTIFACT_TYPES = [
+  "prd", "roadmap", "technical_spec", "sprint_plan", "product_strategy", "ux_audit", "engineering_plan",
+  // Execution-plan-generated artifact types (see routes/pmx.ts generateArtifactsForPlan):
+  "architecture_summary", "api_contract", "database_schema",
+  "ui_specification", "component_inventory",
+  "test_plan", "release_checklist",
+  "launch_plan", "newsletter_draft",
+  "faq", "help_center_outline",
+] as const;
+
 export interface IPmxArtifact extends Document {
   projectId: string;
   userId: string;
   title: string;
-  type: "prd" | "roadmap" | "technical_spec" | "sprint_plan" | "product_strategy" | "ux_audit" | "engineering_plan";
+  type: typeof PMX_ARTIFACT_TYPES[number];
+  department?: string;
+  planId?: string;
   content: string; // raw content or markdown
   format: "markdown" | "pdf" | "json";
   sourceInputIds?: string[];
@@ -673,10 +927,12 @@ const PmxArtifactSchema = new Schema<IPmxArtifact>(
     title: { type: String, required: true },
     type: {
       type: String,
-      enum: ["prd", "roadmap", "technical_spec", "sprint_plan", "product_strategy", "ux_audit", "engineering_plan"],
+      enum: PMX_ARTIFACT_TYPES,
       required: true,
       index: true,
     },
+    department: { type: String },
+    planId: { type: String },
     content: { type: String, required: true },
     format: { type: String, enum: ["markdown", "pdf", "json"], default: "markdown" },
     sourceInputIds: [{ type: String }],
@@ -1154,3 +1410,51 @@ const PmxTokenUsageSchema = new Schema<IPmxTokenUsage>(
 );
 
 export const PmxTokenUsageModel = mongoose.model<IPmxTokenUsage>("PmxTokenUsage", PmxTokenUsageSchema);
+
+// ==========================================
+// 21. PER-USER USAGE ALLOWANCE (running counter)
+// ==========================================
+// PmxTokenUsage above is an append-only historical event log (one row per
+// AI call) — it can't itself provide race-safe "check the limit, then
+// consume it" semantics (aggregating it on every check is a read-then-write
+// race). This is a small, separate running-total document per (userId,
+// projectId) used purely for atomic enforcement — see reserveUsage/
+// reconcileUsage/releaseReservation in services/pmxUsage.ts. inputTokens/
+// outputTokens/totalTokens here are the confirmed, committed totals (source
+// for the Usage & Plan page's numbers); reservedTokens is a short-lived
+// in-flight estimate that should sit at/near 0 outside of an actual request
+// in progress.
+export interface IPmxUserUsage extends Document {
+  userId: string;
+  projectId: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  reservedTokens: number;
+  limit: number;
+  // Unused today — no billing cycle/reset exists yet. Kept nullable so a
+  // future paid plan's monthly reset can slot in without a schema change or
+  // a conflicting parallel system; nothing currently reads these.
+  periodStart?: Date | null;
+  periodEnd?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PmxUserUsageSchema = new Schema<IPmxUserUsage>(
+  {
+    userId: { type: String, required: true, index: true },
+    projectId: { type: String, required: true, index: true },
+    inputTokens: { type: Number, default: 0 },
+    outputTokens: { type: Number, default: 0 },
+    totalTokens: { type: Number, default: 0 },
+    reservedTokens: { type: Number, default: 0 },
+    limit: { type: Number, default: 100_000 },
+    periodStart: { type: Date, default: null },
+    periodEnd: { type: Date, default: null },
+  },
+  { timestamps: true }
+);
+PmxUserUsageSchema.index({ userId: 1, projectId: 1 }, { unique: true });
+
+export const PmxUserUsageModel = mongoose.model<IPmxUserUsage>("PmxUserUsage", PmxUserUsageSchema);

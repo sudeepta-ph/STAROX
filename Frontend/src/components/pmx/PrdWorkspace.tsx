@@ -11,7 +11,7 @@ import {
   FileDown, FileJson, FileText, ClipboardCopy, AlertCircle,
   RotateCcw, Circle, CheckCircle2, GitMerge,
   PanelLeftClose, PanelLeftOpen, List, Plus,
-  Edit3, Save
+  Edit3, Save, Award, RefreshCw
 } from "lucide-react";
 import { getPmxHeaders, pmxFetch, usePmxStore } from "@/lib/pmxStore";
 import { useToast } from "@/components/ui/use-toast";
@@ -290,6 +290,10 @@ export default function PrdWorkspace({
   const activeProjectId = usePmxStore(s => s.projectId);
   const promoteToTab = usePmxStore(s => s.promoteToTab);
   const hasStartedGenerateRef = useRef(false);
+  const executionPlan = usePmxStore(s => s.executionPlan);
+  const generatingExecution = usePmxStore(s => s.loading.executionGenerate);
+  const generateExecution = usePmxStore(s => s.generateExecution);
+  const regenerateExecution = usePmxStore(s => s.regenerateExecution);
 
   // Initialize chat/revision log
   const [chatLog, setChatLog] = useState<ChatEntry[]>(() => {
@@ -555,6 +559,31 @@ export default function PrdWorkspace({
     }
   };
 
+  // Whether this doc already has a generated execution plan, and whether
+  // that plan is out of date relative to the doc's current version — drives
+  // the toolbar button switching between "Create Execution" and
+  // "Regenerate Execution" (see PMX.md's Create Execution feature).
+  const hasExecutionForDoc = !!(executionPlan && executionPlan.sourceId === doc?._id);
+  const isExecutionStale = hasExecutionForDoc && executionPlan!.sourcePrdVersion !== doc?.version;
+
+  const handleCreateExecution = async () => {
+    if (!doc?._id) return;
+    const source = kind === "idea" ? { ideaPrdId: doc._id } : { solutionId: doc._id };
+    if (isExecutionStale) {
+      const diff = await regenerateExecution(source);
+      if (diff) {
+        toast({
+          title: "Execution plan regenerated",
+          description: `${diff.added} added · ${diff.updated} updated · ${diff.removed} removed.`,
+        });
+        navigate("/pmx/execution");
+      }
+    } else {
+      const ok = await generateExecution(source);
+      if (ok) navigate("/pmx/execution");
+    }
+  };
+
   const scrollToSection = (sectionId: string) => {
     const el = document.getElementById(sectionId);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -701,6 +730,26 @@ export default function PrdWorkspace({
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Create/Regenerate Execution — turns this PRD into a
+                  department-aware sprint backlog on /pmx/execution. */}
+              <button
+                onClick={handleCreateExecution}
+                disabled={generatingExecution}
+                title={isExecutionStale ? "The PRD changed since the last execution plan — regenerate it" : "Generate a sprint-ready backlog from this PRD"}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border/50 hover:bg-muted text-xs font-medium text-foreground transition-all disabled:opacity-50"
+              >
+                {generatingExecution ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : isExecutionStale ? (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                ) : (
+                  <Award className="h-3.5 w-3.5" />
+                )}
+                <span className="hidden sm:inline">
+                  {generatingExecution ? "Generating…" : isExecutionStale ? "Regenerate Execution" : "Create Execution"}
+                </span>
+              </button>
 
               {/* Request Build CTA */}
               <button
