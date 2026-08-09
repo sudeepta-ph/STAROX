@@ -47,6 +47,8 @@ import PmxHistory from "@/pages/pmx/PmxHistory";
 import PmxSettings from "@/pages/pmx/PmxSettings";
 import PmxProducts from "@/pages/pmx/PmxProducts";
 import PmxDocs from "@/pages/pmx/PmxDocs";
+import PmxJoin from "@/pages/pmx/PmxJoin";
+import PmxJoinCode from "@/pages/pmx/PmxJoinCode";
 
 const CLERK_PUBLISHABLE_KEY = (import.meta as any).env.VITE_CLERK_PUBLISHABLE_KEY;
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
@@ -55,10 +57,16 @@ if (!CLERK_PUBLISHABLE_KEY) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY in environment variables.");
 }
 
-// Helper component to sync Clerk Auth state and fetch role from the backend (MongoDB)
+// Helper component to sync Clerk Auth state and fetch role from the backend (MongoDB).
+// Rendered inside <BrowserRouter> so it can resume a pending workspace
+// invite (see PmxJoin.tsx) once sign-in completes — the invite-accept flow
+// stashes a token in sessionStorage before opening AuthModal, since every
+// existing AuthModal success path hard-navigates elsewhere (/dashboard, or
+// "/" for OAuth) with no "return to X" plumbing of its own.
 function ClerkAuthSync() {
   const { isLoaded, isSignedIn, user: clerkUser } = useUser();
   const { setUser, setLoading } = useAuthStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!isLoaded) {
@@ -89,6 +97,16 @@ function ClerkAuthSync() {
           photoURL: clerkUser.imageUrl || null,
           role: userRole
         });
+
+        const pendingInviteToken = sessionStorage.getItem("pmx_pending_invite_token");
+        const pendingInviteCode = sessionStorage.getItem("pmx_pending_invite_code");
+        if (pendingInviteToken) {
+          sessionStorage.removeItem("pmx_pending_invite_token");
+          navigate(`/pmx/join/${pendingInviteToken}`);
+        } else if (pendingInviteCode) {
+          sessionStorage.removeItem("pmx_pending_invite_code");
+          navigate(`/pmx/join?code=${encodeURIComponent(pendingInviteCode)}`);
+        }
       } else {
         setUser(null);
       }
@@ -96,7 +114,7 @@ function ClerkAuthSync() {
     };
 
     syncUserSession();
-  }, [isLoaded, isSignedIn, clerkUser, setUser, setLoading]);
+  }, [isLoaded, isSignedIn, clerkUser, setUser, setLoading, navigate]);
 
   return null;
 }
@@ -170,19 +188,24 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} afterSignOutUrl="/">
-      <ClerkAuthSync />
       <ThemeProvider attribute="class" defaultTheme="dark" storageKey="starox-theme">
         <BrowserRouter>
+          <ClerkAuthSync />
           <Routes>
             {/* Public Callback */}
             <Route
               path="/sso-callback"
               element={<AuthenticateWithRedirectCallback signInForceRedirectUrl="/" signUpForceRedirectUrl="/" />}
             />
-            
+
             {/* Public Blog Routes */}
             <Route path="/blog" element={<Blog />} />
             <Route path="/blog/:slug" element={<BlogPost />} />
+
+            {/* Public PMX workspace invite — code entry is the current mechanism;
+                the token route stays live only to resolve already-distributed links */}
+            <Route path="/pmx/join" element={<PmxJoinCode />} />
+            <Route path="/pmx/join/:token" element={<PmxJoin />} />
 
             {/* Public Pages */}
             <Route path="/" element={<Navigate to="/starox-intelligence" replace />} />

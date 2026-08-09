@@ -194,20 +194,24 @@ export default function PmxProducts() {
                           <Check className="h-2.5 w-2.5" /> Active
                         </span>
                       )}
-                      <button
-                        onClick={(e) => startRename(w, e)}
-                        title="Rename product"
-                        className="p-1.5 rounded-lg text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted transition-all"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setConfirmDelete(w); }}
-                        title="Delete product"
-                        className="p-1.5 rounded-lg text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-400/10 transition-all"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {w.role !== "member" && (
+                        <button
+                          onClick={(e) => startRename(w, e)}
+                          title="Rename product"
+                          className="p-1.5 rounded-lg text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted transition-all"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {w.role === "owner" && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setConfirmDelete(w); }}
+                          title="Delete product"
+                          className="p-1.5 rounded-lg text-muted-foreground/60 opacity-0 group-hover:opacity-100 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
 

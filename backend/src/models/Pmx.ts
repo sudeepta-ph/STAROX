@@ -79,6 +79,16 @@ export interface IPmxUnderstanding extends Document {
     updatedBy: string;
     understandingData: Record<string, any>;
   }>;
+  // Workspace-level metadata — distinct from the product fields above.
+  // "Product" is what's being built (productSummary etc.); "Workspace" is
+  // the team/environment PMX is being used in. Both live on this doc since
+  // projectId is the single shared container for both concepts today.
+  workspaceName?: string;
+  workspaceDescription?: string;
+  inviteLinksEnabled: boolean;
+  aiSettings: {
+    autoAnalysis: boolean;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -134,11 +144,121 @@ const PmxUnderstandingSchema = new Schema<IPmxUnderstanding>(
         understandingData: { type: Schema.Types.Mixed },
       },
     ],
+    workspaceName: { type: String },
+    workspaceDescription: { type: String },
+    inviteLinksEnabled: { type: Boolean, default: true },
+    aiSettings: {
+      autoAnalysis: { type: Boolean, default: false },
+    },
   },
   { timestamps: true }
 );
 
 export const PmxUnderstandingModel = mongoose.model<IPmxUnderstanding>("PmxUnderstanding", PmxUnderstandingSchema);
+
+// ==========================================
+// 2B. WORKSPACE MEMBERSHIP MODEL
+// ==========================================
+// Membership in a workspace (projectId) is what actually governs access to
+// every PMX collection now — see requireWorkspaceAccess/getMemberRole in
+// workspaces/pmx/middleware/workspaceAccess.ts. The `userId` field on other
+// PMX documents remains creator/actor provenance only, not an access filter.
+export interface IPmxWorkspaceMember extends Document {
+  projectId: string;
+  userId: string; // Clerk id
+  role: "owner" | "admin" | "member";
+  invitedBy?: string;
+  joinedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PmxWorkspaceMemberSchema = new Schema<IPmxWorkspaceMember>(
+  {
+    projectId: { type: String, required: true, index: true },
+    userId: { type: String, required: true, index: true },
+    role: { type: String, enum: ["owner", "admin", "member"], required: true },
+    invitedBy: { type: String },
+    joinedAt: { type: Date, default: Date.now },
+  },
+  { timestamps: true }
+);
+PmxWorkspaceMemberSchema.index({ projectId: 1, userId: 1 }, { unique: true });
+
+export const PmxWorkspaceMemberModel = mongoose.model<IPmxWorkspaceMember>("PmxWorkspaceMember", PmxWorkspaceMemberSchema);
+
+// ==========================================
+// 2C. WORKSPACE INVITE MODEL (legacy — link-based)
+// ==========================================
+// DEPRECATED: superseded by PmxWorkspaceInviteCodeModel below. Kept
+// unmodified, with its accept-by-token route still live, purely so any
+// already-distributed /pmx/join/<uuid> link keeps resolving and joining —
+// nothing in the app generates new rows here anymore. One standing,
+// revocable link per workspace. `role` is hard-pinned to "member" — an
+// invite link can never grant elevated access.
+export interface IPmxWorkspaceInvite extends Document {
+  projectId: string;
+  token: string;
+  role: "member";
+  createdBy: string;
+  revoked: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PmxWorkspaceInviteSchema = new Schema<IPmxWorkspaceInvite>(
+  {
+    projectId: { type: String, required: true, index: true },
+    token: { type: String, required: true, unique: true, index: true },
+    role: { type: String, enum: ["member"], default: "member" },
+    createdBy: { type: String, required: true },
+    revoked: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
+export const PmxWorkspaceInviteModel = mongoose.model<IPmxWorkspaceInvite>("PmxWorkspaceInvite", PmxWorkspaceInviteSchema);
+
+// ==========================================
+// 2D. WORKSPACE INVITE CODE MODEL
+// ==========================================
+// Current invite mechanism — a short human-enterable code (XXXX-XXXX)
+// instead of a link. Only `codeHash` (sha256 of the normalized code) is
+// stored, never the plaintext — the plaintext is generated, returned once
+// in the generate/regenerate response, and never persisted server-side.
+// One active (non-revoked) code per workspace at a time, same "standing,
+// regenerable" shape as the legacy invite link. `role` is hard-pinned to
+// "member" for the same reason.
+export interface IPmxWorkspaceInviteCode extends Document {
+  projectId: string;
+  codeHash: string;
+  createdBy: string;
+  role: "member";
+  expiresAt: Date | null;
+  maxUses: number | null;
+  usageCount: number;
+  revoked: boolean;
+  revokedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const PmxWorkspaceInviteCodeSchema = new Schema<IPmxWorkspaceInviteCode>(
+  {
+    projectId: { type: String, required: true, index: true },
+    codeHash: { type: String, required: true, unique: true, index: true },
+    createdBy: { type: String, required: true },
+    role: { type: String, enum: ["member"], default: "member" },
+    expiresAt: { type: Date, default: null },
+    maxUses: { type: Number, default: null },
+    usageCount: { type: Number, default: 0 },
+    revoked: { type: Boolean, default: false },
+    revokedAt: { type: Date, default: null },
+  },
+  { timestamps: true }
+);
+
+export const PmxWorkspaceInviteCodeModel = mongoose.model<IPmxWorkspaceInviteCode>("PmxWorkspaceInviteCode", PmxWorkspaceInviteCodeSchema);
 
 // ==========================================
 // 3. EVIDENCE MODEL (Stage 3)

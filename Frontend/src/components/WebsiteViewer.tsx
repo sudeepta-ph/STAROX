@@ -3,15 +3,26 @@ import { ExternalLink, RefreshCw, AlertCircle } from "lucide-react";
 
 interface WebsiteViewerProps {
   url: string;
+  onReady?: () => void;
+  onError?: (err?: any) => void;
 }
 
-export default function WebsiteViewer({ url }: WebsiteViewerProps) {
+export default function WebsiteViewer({ url, onReady, onError }: WebsiteViewerProps) {
   const [key, setKey] = useState(0);
   const [error, setError] = useState(false);
 
   const reload = () => { setKey((k) => k + 1); setError(false); };
 
   const displayUrl = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+  const handleIframeLoad = () => {
+    onReady?.();
+  };
+
+  const handleIframeError = (e: any) => {
+    setError(true);
+    onError?.(e);
+  };
 
   return (
     <div className="flex flex-col h-full bg-muted/5">
@@ -58,7 +69,8 @@ export default function WebsiteViewer({ url }: WebsiteViewerProps) {
             title="Website preview"
             className="w-full h-full border-none"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            onError={() => setError(true)}
+            onLoad={handleIframeLoad}
+            onError={handleIframeError}
           />
         )}
       </div>

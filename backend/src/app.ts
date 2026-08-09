@@ -15,6 +15,7 @@ import { connectorsRouter } from "./workspaces/pmx/routes/connectors";
 import { blogRouter } from "./api/routes/blogRoutes.js";
 import { contactRouter } from "./api/routes/contact";
 import { pmxRouter } from "./workspaces/pmx/routes/pmx";
+import { pmxInviteRouter } from "./api/routes/pmxInvite";
 import { errorHandler } from "./middleware/errorHandler";
 
 export const app = express();
@@ -53,6 +54,7 @@ app.use("/api", connectorsRouter);
 app.use("/api", blogRouter);
 app.use("/api", contactRouter);
 app.use("/api/pmx", pmxRouter);
+app.use("/api/pmx-invite", pmxInviteRouter);
 app.use("/", proxyRouter);
 
 app.use(errorHandler);

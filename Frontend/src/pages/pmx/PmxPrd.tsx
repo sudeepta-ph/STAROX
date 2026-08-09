@@ -115,75 +115,49 @@ export default function PmxPrd() {
   return (
     <div className="flex flex-col h-[calc(100vh-3.5rem)] overflow-hidden bg-background">
       {!ideaPrdChecked ? null : ideaPrd ? (
-        <PrdWorkspace key={ideaPrd._id} doc={ideaPrd} kind="idea" />
+        <PrdWorkspace
+          key={ideaPrd._id}
+          doc={ideaPrd}
+          kind="idea"
+          allDocs={solutions.length > 0 ? [ideaPrd, ...solutions] : [ideaPrd]}
+          activeDocId={ideaPrd._id}
+          onSelectDoc={(id) => {
+            if (id === ideaPrd._id) return;
+            setIdeaPrd(null);
+            setActiveSolutionId(id);
+          }}
+        />
       ) : !selectedSolution ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
-          <div className="h-14 w-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-            <BookOpen className="h-7 w-7 text-primary" />
+          <div className="h-14 w-14 rounded-2xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
+            <BookOpen className="h-7 w-7 text-sky-400" />
           </div>
           <div className="text-center">
             <p className="text-sm font-semibold text-foreground">No blueprints yet</p>
             <p className="text-xs text-muted-foreground mt-1">Approve an insight, or describe an idea on Overview, to generate your first PRD.</p>
           </div>
+          <button
+            onClick={() => navigate("/pmx/overview")}
+            className="mt-2 px-4 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-xs font-semibold text-black transition-colors"
+          >
+            Create First PRD →
+          </button>
         </div>
       ) : (
-        <>
-          {solutions.length > 1 && (
-            <div className="shrink-0 border-b border-border/40 bg-card/10">
-              <div className="flex items-center gap-1.5 px-4 py-2 overflow-x-auto scrollbar-none">
-                <Layers className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                {solutions.map(sol => {
-                  const isChecked = selectedForCombine.includes(sol._id);
-                  const isCombined = (sol.combinedFromSolutionIds?.length || 0) > 0;
-                  return (
-                    <button
-                      key={sol._id}
-                      onClick={() => combineMode ? toggleCombineSelect(sol._id) : setActiveSolutionId(sol._id)}
-                      title={isCombined ? `Unified from ${sol.combinedFromSolutionIds!.length} blueprints` : undefined}
-                      className={`flex items-center gap-1.5 shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-all ${
-                        combineMode
-                          ? isChecked ? "bg-primary/10 text-primary border border-primary/30" : "text-muted-foreground hover:bg-muted/50 border border-border/40"
-                          : selectedSolution._id === sol._id
-                            ? isCombined ? "bg-violet-500/10 text-violet-600 dark:text-violet-300 border border-violet-500/30" : "bg-primary/10 text-primary border border-primary/20"
-                            : "text-muted-foreground hover:bg-muted/50 border border-transparent"
-                      }`}
-                    >
-                      {combineMode
-                        ? <Checkbox checked={isChecked} className="pointer-events-none h-3 w-3" />
-                        : isCombined ? <GitMerge className="h-3 w-3 text-violet-500 dark:text-violet-300 shrink-0" /> : <FileText className="h-3 w-3" />}
-                      {sol.title}
-                    </button>
-                  );
-                })}
-                <div className="flex-1" />
-                <button
-                  onClick={() => { setCombineMode(m => !m); setSelectedForCombine([]); }}
-                  className={`shrink-0 flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-all ${
-                    combineMode ? "border-primary/30 bg-primary/10 text-primary" : "border-border/50 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  }`}
-                >
-                  <GitMerge className="h-3 w-3" /> {combineMode ? "Cancel" : "Combine"}
-                </button>
-              </div>
-              {combineMode && (
-                <div className="flex items-center justify-between gap-2 px-4 py-2 border-t border-border/30">
-                  <span className="text-[10px] text-muted-foreground">
-                    {selectedForCombine.length} selected — pick at least 2 blueprints to merge into one unified PRD
-                  </span>
-                  <button
-                    onClick={handleCombine}
-                    disabled={selectedForCombine.length < 2 || combining}
-                    className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-3 py-1.5 text-[11px] font-semibold text-primary-foreground transition-all disabled:opacity-40"
-                  >
-                    {combining ? <Loader2 className="h-3 w-3 animate-spin" /> : <GitMerge className="h-3 w-3" />}
-                    Combine into Unified PRD
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-          <PrdWorkspace key={selectedSolution._id} doc={selectedSolution} kind="solution" />
-        </>
+        <PrdWorkspace
+          key={selectedSolution._id}
+          doc={selectedSolution}
+          kind="solution"
+          allDocs={solutions}
+          activeDocId={selectedSolution._id}
+          onSelectDoc={(id) => setActiveSolutionId(id)}
+          combineMode={combineMode}
+          selectedForCombine={selectedForCombine}
+          onToggleCombineSelect={toggleCombineSelect}
+          onToggleCombineMode={() => { setCombineMode(m => !m); setSelectedForCombine([]); }}
+          onExecuteCombine={handleCombine}
+          combining={combining}
+        />
       )}
     </div>
   );

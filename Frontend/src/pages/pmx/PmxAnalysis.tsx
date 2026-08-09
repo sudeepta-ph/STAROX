@@ -70,32 +70,14 @@ interface UploadedScreen {
   label: string;
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const SEVERITY_META = {
-  critical: { label: "Critical", color: "text-red-400",    bg: "bg-red-500/10 border-red-500/20",       dot: "bg-red-400"    },
-  high:     { label: "High",     color: "text-orange-400", bg: "bg-orange-500/10 border-orange-500/20", dot: "bg-orange-400" },
-  medium:   { label: "Medium",   color: "text-yellow-400", bg: "bg-yellow-500/10 border-yellow-500/20", dot: "bg-yellow-400" },
-  low:      { label: "Low",      color: "text-sky-400",    bg: "bg-sky-500/10 border-sky-500/20",       dot: "bg-sky-400"    },
+const SEVERITY_META: Record<string, { label: string; color: string; dot: string }> = {
+  critical: { label: "Critical", color: "text-red-400",    dot: "bg-red-400"    },
+  high:     { label: "High",     color: "text-orange-400", dot: "bg-orange-400" },
+  medium:   { label: "Medium",   color: "text-amber-400",  dot: "bg-amber-400"  },
+  low:      { label: "Low",      color: "text-sky-400",    dot: "bg-sky-400"    },
 };
 
-const CATEGORY_ICONS: Record<string, any> = {
-  "Visual Hierarchy":             Eye,
-  "Spacing & Alignment":          Layers,
-  "Typography":                   Type,
-  "Color & Contrast":             Contrast,
-  "CTA Placement":                MousePointer2,
-  "Navigation":                   Navigation,
-  "Layout Balance":               Layout,
-  "Component Consistency":        Puzzle,
-  "Accessibility":                Accessibility,
-  "Responsiveness":               Smartphone,
-  "User Flow":                    GitBranch,
-  "Usability Friction":           Zap,
-  "Cross-Screen Inconsistencies": Layers,
-};
-
-function scoreColor(s: number) { return s >= 75 ? "text-green-400" : s >= 50 ? "text-yellow-400" : "text-red-400"; }
+function scoreColor(s: number) { return s >= 75 ? "text-green-400" : s >= 50 ? "text-amber-400" : "text-red-400"; }
 function scoreLabel(s: number) { return s >= 80 ? "Good" : s >= 60 ? "Needs Work" : s >= 40 ? "Poor" : "Critical Issues"; }
 
 function severityCountsFor(issues: UIIssue[]) {
@@ -126,150 +108,83 @@ function pushHistory(entry: HistoryEntry) {
   saveHistory([entry, ...existing]);
 }
 
-// ── ScoreRing ─────────────────────────────────────────────────────────────────
+// ── FindingItem (Editorial Claude-style report row) ──────────────────────────
 
-function ScoreRing({ score, size = 14 }: { score: number; size?: number }) {
-  const r = size * 0.78, circ = 2 * Math.PI * r, filled = (score / 100) * circ;
-  const px = size * 4;
-  return (
-    <div className="relative flex items-center justify-center shrink-0" style={{ width: px, height: px }}>
-      <svg className="-rotate-90" width={px} height={px} viewBox={`0 0 ${px} ${px}`}>
-        <circle cx={px/2} cy={px/2} r={r} fill="none" stroke="hsl(var(--border))" strokeWidth={size * 0.35} />
-        <circle cx={px/2} cy={px/2} r={r} fill="none"
-          stroke={score >= 75 ? "#4ade80" : score >= 50 ? "#facc15" : "#f87171"}
-          strokeWidth={size * 0.35} strokeDasharray={`${filled} ${circ}`} strokeLinecap="round" />
-      </svg>
-      <span className={`absolute font-black ${scoreColor(score)}`} style={{ fontSize: size * 0.85 }}>{score}</span>
-    </div>
-  );
-}
-
-// ── IssueCard ─────────────────────────────────────────────────────────────────
-
-function IssueCard({ issue, index }: { issue: UIIssue; index: number }) {
-  const [open, setOpen] = useState(false);
+function FindingItem({
+  issue,
+  index,
+  open,
+  onToggle,
+}: {
+  issue: UIIssue;
+  index: number;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const meta = SEVERITY_META[issue.severity] || SEVERITY_META.low;
-  const Icon = CATEGORY_ICONS[issue.category] || Zap;
+  const numStr = String(index + 1).padStart(2, "0");
 
   return (
-    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.03 }}
-      className={`rounded-xl border ${meta.bg} overflow-hidden`}
-    >
-      <button onClick={() => setOpen(o => !o)}
-        className="w-full flex items-start gap-3 p-3.5 text-left hover:bg-muted/40 transition-colors"
+    <div className="border-b border-border/30 last:border-b-0 py-4 transition-colors">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-start justify-between gap-3 text-left group focus:outline-none"
       >
-        <span className="shrink-0 w-5 h-5 rounded-full bg-muted text-[9px] font-bold text-muted-foreground flex items-center justify-center mt-0.5">
-          {index + 1}
-        </span>
-        <span className={`shrink-0 mt-0.5 ${meta.color}`}><Icon className="h-3.5 w-3.5" /></span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-xs font-semibold text-foreground leading-tight">{issue.title}</h3>
-            <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${meta.bg} ${meta.color}`}>
-              {meta.label}
-            </span>
+        <div className="flex items-start gap-3 min-w-0">
+          <span className="font-mono text-xs font-semibold text-muted-foreground/60 shrink-0 mt-0.5 select-none">
+            {numStr}
+          </span>
+          <div className="min-w-0">
+            <h3 className="text-xs sm:text-sm font-semibold text-foreground group-hover:text-sky-400 transition-colors leading-snug">
+              {issue.title}
+            </h3>
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-1 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 font-medium">
+                <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                <span className={meta.color}>{meta.label}</span>
+              </span>
+              <span>·</span>
+              <span className="truncate max-w-[180px] sm:max-w-xs">{issue.screen}</span>
+              <span>·</span>
+              <span className="text-muted-foreground/80">{issue.category}</span>
+            </div>
           </div>
-          <p className="text-[10px] text-muted-foreground mt-0.5 font-mono truncate">{issue.screen} · {issue.category}</p>
         </div>
-        <span className="shrink-0 text-muted-foreground mt-0.5">
-          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        <span className="shrink-0 text-muted-foreground/60 group-hover:text-foreground transition-colors mt-0.5">
+          {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
         </span>
       </button>
 
       <AnimatePresence>
         {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden"
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
           >
-            <div className="px-4 pb-4 pt-1 space-y-3 border-t border-border/40">
+            <div className="pl-7 pt-3 space-y-3 text-xs leading-relaxed">
               <div>
-                <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Problem</span>
-                <p className="text-[11px] text-foreground/80 mt-1 leading-relaxed">{issue.problem}</p>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Observation
+                </span>
+                <p className="text-foreground/85 mt-0.5">{issue.problem}</p>
               </div>
+
               <div>
-                <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">What to change</span>
-                <p className="text-[11px] text-sky-500 dark:text-sky-300 mt-1 leading-relaxed">{issue.change}</p>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Recommendation
+                </span>
+                <p className="text-sky-500 dark:text-sky-300 mt-0.5">{issue.change}</p>
               </div>
+
               <div>
-                <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Expected improvement</span>
-                <p className="text-[11px] text-green-600 dark:text-green-300 mt-1 leading-relaxed">{issue.improvement}</p>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Why it matters / Impact
+                </span>
+                <p className="text-muted-foreground/90 mt-0.5">{issue.improvement}</p>
               </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-}
-
-// ── IssueGroupSection ─────────────────────────────────────────────────────────
-// One collapsible section per screenshot (keyed by screenshotIndex), plus a
-// "General / Cross-screen" section for issues with screenshotIndex: null.
-// `issues` here is already the post-filter set for this group — the group's
-// thumbnail/summary/list all reflect only what's currently passing the
-// severity/category filters.
-
-interface IssueGroup {
-  key: string;
-  screenshotIndex: number | null;
-  issues: UIIssue[];
-}
-
-function IssueGroupSection({ group, thumbnail, collapsed, onToggle }: {
-  group: IssueGroup; thumbnail?: UploadedScreen; collapsed: boolean; onToggle: () => void;
-}) {
-  const counts = severityCountsFor(group.issues);
-  const isGeneral = group.screenshotIndex === null;
-  const heading = isGeneral
-    ? "General / Cross-screen"
-    : thumbnail?.label || group.issues[0]?.screen || `Screenshot ${group.screenshotIndex! + 1}`;
-
-  return (
-    <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
-      <button onClick={onToggle} className="w-full flex items-center gap-3 p-3 text-left hover:bg-muted/30 transition-colors">
-        {isGeneral ? (
-          <div className="h-10 w-14 rounded-lg bg-muted flex items-center justify-center shrink-0">
-            <Layers className="h-4 w-4 text-muted-foreground" />
-          </div>
-        ) : thumbnail ? (
-          <img src={thumbnail.dataUrl} alt={heading} className="h-10 w-14 object-cover rounded-lg border border-border shrink-0" />
-        ) : (
-          <div className="h-10 w-14 rounded-lg bg-muted flex items-center justify-center shrink-0">
-            <ImagePlus className="h-4 w-4 text-muted-foreground" />
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-bold text-foreground truncate">{heading}</p>
-          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-            {(["critical", "high", "medium", "low"] as const).map(s => {
-              const count = counts[s];
-              if (!count) return null;
-              const m = SEVERITY_META[s];
-              return (
-                <div key={s} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border ${m.bg}`}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />
-                  <span className={`text-[9px] font-bold ${m.color}`}>{count}</span>
-                </div>
-              );
-            })}
-            <span className="text-[9px] text-muted-foreground font-mono">
-              {group.issues.length} issue{group.issues.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-        </div>
-        <span className="shrink-0 text-muted-foreground">
-          {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-        </span>
-      </button>
-
-      <AnimatePresence>
-        {!collapsed && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden"
-          >
-            <div className="px-3 pb-3 pt-2 space-y-2 border-t border-border/40">
-              {group.issues.map((issue, i) => <IssueCard key={issue.id} issue={issue} index={i} />)}
             </div>
           </motion.div>
         )}
@@ -278,7 +193,22 @@ function IssueGroupSection({ group, thumbnail, collapsed, onToggle }: {
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+function validateAndNormalizeUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  let formatted = trimmed;
+  if (!/^https?:\/\//i.test(formatted)) {
+    formatted = `https://${formatted}`;
+  }
+  try {
+    const parsed = new URL(formatted);
+    if (!["http:", "https:"].includes(parsed.protocol)) return null;
+    if (!parsed.hostname || parsed.hostname.length < 3) return null;
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
 
 // The actual audit workspace (URL/screenshot input, split preview + analysis
 // panel, history). Extracted so it can be reused both as the standalone
@@ -318,6 +248,19 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
   // still on screen; addToInsights must save to the workspace the audit was
   // actually run under, not whatever happens to be active when they click.
   const [auditProjectId, setAuditProjectId] = useState<string | null>(null);
+
+  // ── Refs for readiness & duplicate prevention ─────────────────────────────
+  const pendingAuditUrlRef = useRef<string | null>(null);
+  const inFlightRef = useRef<boolean>(false);
+  const previewReadyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (previewReadyTimeoutRef.current) {
+        clearTimeout(previewReadyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // ── Add to Insights ───────────────────────────────────────────────────────
   const [addingToInsights, setAddingToInsights]     = useState(false);
@@ -417,15 +360,32 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
     performAddToInsights(result.issues.filter(i => failedIds.has(i.id)));
   };
 
-  // ── Filters ───────────────────────────────────────────────────────────────
+  // ── Filters & Expansion ───────────────────────────────────────────────────
   const [severityFilter, setSeverityFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const toggleGroup = (key: string) => setCollapsedGroups(prev => {
+  const [expandedIssueIds, setExpandedIssueIds] = useState<Set<string>>(new Set());
+
+  const toggleIssue = (id: string) => setExpandedIssueIds(prev => {
     const next = new Set(prev);
-    next.has(key) ? next.delete(key) : next.add(key);
+    next.has(id) ? next.delete(id) : next.add(id);
     return next;
   });
+
+  const toggleAllIssues = () => {
+    if (!result) return;
+    if (expandedIssueIds.size === filteredIssues.length) {
+      setExpandedIssueIds(new Set());
+    } else {
+      setExpandedIssueIds(new Set(filteredIssues.map(i => i.id)));
+    }
+  };
+
+  // Auto-expand the first 2 findings whenever a fresh result arrives
+  useEffect(() => {
+    if (result?.issues?.length) {
+      setExpandedIssueIds(new Set(result.issues.slice(0, 2).map(i => i.id)));
+    }
+  }, [result]);
 
   // ── Right panel tab: "analysis" | "history" ───────────────────────────────
   const [rightTab, setRightTab] = useState<"analysis" | "history">("analysis");
@@ -517,13 +477,24 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
     return entry;
   };
 
-  // ── Initial audit ─────────────────────────────────────────────────────────
+  // ── Initial audit & submission handlers ─────────────────────────────────────
 
-  const runAudit = async () => {
+  const runAudit = async (overrideUrl?: string) => {
+    if (inFlightRef.current) return;
+
+    if (previewReadyTimeoutRef.current) {
+      clearTimeout(previewReadyTimeoutRef.current);
+      previewReadyTimeoutRef.current = null;
+    }
+    pendingAuditUrlRef.current = null;
+
     const isUrl = activeTab === "url";
-    if (isUrl && !urlInput.trim()) return;
+    const targetUrl = isUrl ? (overrideUrl || previewUrl || urlInput).trim() : undefined;
+
+    if (isUrl && !targetUrl) return;
     if (!isUrl && uploadedImages.length === 0) return;
 
+    inFlightRef.current = true;
     setRunning(true);
     setResult(null);
     setAuditError(null);
@@ -538,10 +509,11 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
       const body: any = {};
       const src: "url" | "screenshot" = isUrl ? "url" : "screenshot";
 
-      if (isUrl) {
-        body.url   = urlInput.trim();
-        body.title = urlInput.trim();
-        setPreviewUrl(urlInput.trim());
+      if (isUrl && targetUrl) {
+        body.url   = targetUrl;
+        body.title = targetUrl;
+        setPreviewUrl(targetUrl);
+        setUrlInput(targetUrl);
       } else if (uploadedImages.length > 0) {
         body.screenshots      = uploadedImages.map(img => img.dataUrl);
         body.screenshotLabels = uploadedImages.map((img, i) => img.label || `Screen ${i + 1}`);
@@ -560,13 +532,95 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
       if (!json.success) throw new Error(json.error || "Audit failed");
 
       setResult(json.data);
-      persistToHistory(json.data, src, isUrl ? urlInput.trim() : undefined, capturedProjectId);
+      persistToHistory(json.data, src, isUrl ? targetUrl : undefined, capturedProjectId);
     } catch (err: any) {
       if (!isUrl) setAuditError(err.message || "Audit failed. Please try again.");
       toast({ variant: "destructive", title: "Audit failed", description: err.message });
     } finally {
+      inFlightRef.current = false;
       setRunning(false);
     }
+  };
+
+  const handleUrlSubmit = () => {
+    if (activeTab !== "url") {
+      runAudit();
+      return;
+    }
+
+    const validated = validateAndNormalizeUrl(urlInput);
+    if (!validated) {
+      toast({
+        variant: "destructive",
+        title: "Invalid URL",
+        description: "Please enter a valid website URL (e.g. https://yourproduct.com).",
+      });
+      return;
+    }
+
+    setUrlInput(validated);
+    setPreviewUrl(validated);
+    setAuditSrc("url");
+    setResult(null);
+    setAuditError(null);
+    setRightTab("analysis");
+    setRunning(true);
+
+    // Queue auto-audit for this URL
+    pendingAuditUrlRef.current = validated;
+
+    // Safety fallback timer: if the iframe onReady does not fire within 2.5s
+    // (e.g. due to third-party sandbox / network quirks), automatically proceed with the audit
+    if (previewReadyTimeoutRef.current) {
+      clearTimeout(previewReadyTimeoutRef.current);
+    }
+    previewReadyTimeoutRef.current = setTimeout(() => {
+      if (pendingAuditUrlRef.current === validated && !inFlightRef.current) {
+        runAudit(validated);
+      }
+    }, 2500);
+  };
+
+  const handlePreviewReady = () => {
+    const pendingUrl = pendingAuditUrlRef.current;
+    if (pendingUrl && pendingUrl === previewUrl && !inFlightRef.current) {
+      if (previewReadyTimeoutRef.current) {
+        clearTimeout(previewReadyTimeoutRef.current);
+        previewReadyTimeoutRef.current = null;
+      }
+      runAudit(pendingUrl);
+    }
+  };
+
+  const handlePreviewError = () => {
+    const pendingUrl = pendingAuditUrlRef.current;
+    if (pendingUrl && pendingUrl === previewUrl && !inFlightRef.current) {
+      if (previewReadyTimeoutRef.current) {
+        clearTimeout(previewReadyTimeoutRef.current);
+        previewReadyTimeoutRef.current = null;
+      }
+      runAudit(pendingUrl);
+    }
+  };
+
+  const handleNewAudit = () => {
+    if (previewReadyTimeoutRef.current) {
+      clearTimeout(previewReadyTimeoutRef.current);
+      previewReadyTimeoutRef.current = null;
+    }
+    pendingAuditUrlRef.current = null;
+    inFlightRef.current = false;
+    setRunning(false);
+    setResult(null);
+    setPreviewUrl("");
+    setUploadedImages([]);
+    setAuditError(null);
+    setUrlInput("");
+    setEnhanceScreens([]);
+    setShowEnhancePanel(false);
+    setAuditProjectId(null);
+    setAddedToInsights(false);
+    setInsightsFailures(null);
   };
 
   // ── Enhancement run ───────────────────────────────────────────────────────
@@ -654,6 +708,13 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
   const clearHistory = () => { saveHistory([]); setHistory([]); };
 
   const restoreFromHistory = (entry: HistoryEntry) => {
+    if (previewReadyTimeoutRef.current) {
+      clearTimeout(previewReadyTimeoutRef.current);
+      previewReadyTimeoutRef.current = null;
+    }
+    pendingAuditUrlRef.current = null;
+    inFlightRef.current = false;
+    setRunning(false);
     setResult(entry.result);
     setAddedToInsights(false);
     setInsightsFailures(null);
@@ -684,6 +745,11 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
   const severityCounts = result
     ? Object.fromEntries((["critical","high","medium","low"] as const).map(s => [s, result.issues.filter(i => i.severity === s).length]))
     : null;
+
+  const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+  const topPriorityIssues = result
+    ? [...result.issues].sort((a, b) => (priorityOrder[a.severity] ?? 9) - (priorityOrder[b.severity] ?? 9)).slice(0, 4)
+    : [];
 
   // One group per screenshotIndex (ascending), plus a "General / Cross-screen"
   // group for screenshotIndex: null pinned first — never guessed into a
@@ -769,21 +835,16 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
           <input type="url" placeholder="https://yourproduct.com"
             value={urlInput}
             onChange={e => setUrlInput(e.target.value)}
-            onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
-            onKeyDown={e => e.key === "Enter" && runAudit()}
+            onKeyDown={e => e.key === "Enter" && handleUrlSubmit()}
             className="flex-1 bg-transparent text-xs text-foreground focus:outline-none placeholder:text-muted-foreground"
           />
           <button
-            onClick={() => {
-              setResult(null); setPreviewUrl(""); setUploadedImages([]); setAuditError(null);
-              setUrlInput(""); setEnhanceScreens([]); setShowEnhancePanel(false); setAuditProjectId(null);
-              setAddedToInsights(false); setInsightsFailures(null);
-            }}
+            onClick={handleNewAudit}
             className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-border hover:bg-muted text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0"
           >
             <RefreshCw className="h-3 w-3" /> New Audit
           </button>
-          <button onClick={runAudit} disabled={running || (activeTab === "url" ? !urlInput.trim() : uploadedImages.length === 0)}
+          <button onClick={() => runAudit()} disabled={running || (activeTab === "url" ? !urlInput.trim() : uploadedImages.length === 0)}
             className="flex items-center gap-1 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-3 py-1.5 text-[11px] font-semibold text-black transition-all shrink-0"
           >
             <Sparkles className="h-3 w-3" /> Re-audit
@@ -818,7 +879,7 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
             </div>
             <div className="flex-1 overflow-hidden min-h-0">
               {previewUrl
-                ? <WebsiteViewer url={previewUrl} />
+                ? <WebsiteViewer url={previewUrl} onReady={handlePreviewReady} onError={handlePreviewError} />
                 : previewImages.length > 0
                   ? (
                     <div className="h-full overflow-y-auto p-4 space-y-3">
@@ -943,179 +1004,294 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
 
                 {/* Results */}
                 {result && !running && (
-                  <div className="p-4 space-y-3">
+                  <div className="p-5 sm:p-6 space-y-6 max-w-3xl">
 
-                    {/* Best-results notice */}
-                    {auditSrc === "url" && (
-                      <div className="rounded-xl border border-sky-500/20 bg-sky-500/5 p-3 flex gap-2.5">
-                        <Info className="h-3.5 w-3.5 text-sky-400 shrink-0 mt-0.5" />
-                        <p className="text-[10px] text-sky-600 dark:text-sky-300 leading-relaxed">
-                          <span className="font-bold">Best Results:</span> If your website has multiple pages or flows, upload screenshots of those screens below. The AI will combine the live analysis with the screenshots for a more complete review.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Score card */}
-                    <div className="rounded-xl border border-border/50 bg-card p-4">
-                      <div className="flex items-start gap-3">
-                        <ScoreRing score={result.overallScore} size={14} />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-bold text-foreground truncate">{result.pageTitle}</span>
-                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full bg-muted ${scoreColor(result.overallScore)}`}>
-                              {scoreLabel(result.overallScore)}
-                            </span>
-                            {auditSrc === "screenshot" && <span className="text-[9px] text-sky-400 font-bold">Multi-screen</span>}
-                          </div>
-                          <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{result.summary}</p>
-                          {severityCounts && (
-                            <div className="flex gap-2 pt-2 flex-wrap">
-                              {(["critical","high","medium","low"] as const).map(s => {
-                                const m = SEVERITY_META[s]; const count = (severityCounts as any)[s] || 0;
-                                if (!count) return null;
-                                return (
-                                  <div key={s} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md border ${m.bg}`}>
-                                    <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} />
-                                    <span className={`text-[9px] font-bold ${m.color}`}>{count} {m.label}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
+                    {/* ── 1. REPORT HEADER & SCORE ─────────────────────────── */}
+                    <div className="space-y-4 pb-6 border-b border-border/40">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          <Sparkles className="h-3 w-3 text-sky-400" />
+                          <span>UX Audit Report</span>
+                          <span>·</span>
+                          <span className="text-foreground font-mono lowercase truncate max-w-[200px] sm:max-w-sm">
+                            {previewUrl || result.pageTitle}
+                          </span>
                         </div>
+                        {auditSrc === "screenshot" && (
+                          <span className="text-[10px] font-semibold text-sky-400 bg-sky-400/10 px-2 py-0.5 rounded shrink-0">
+                            Multi-screen
+                          </span>
+                        )}
                       </div>
-                    </div>
 
-                    {/* Approve & Add to Insights */}
-                    <button onClick={addToInsights} disabled={addingToInsights || addedToInsights}
-                      className="w-full flex items-center justify-center gap-2 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-60 px-4 py-2.5 text-xs font-bold text-black transition-all"
-                    >
-                      {addingToInsights
-                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Adding to Insights…</>
-                        : addedToInsights
-                        ? insightsFailures?.length
-                          ? <><AlertCircle className="h-3.5 w-3.5" /> Partially Added ({insightsFailures.length} failed)</>
-                          : <><CheckCircle2 className="h-3.5 w-3.5" /> Added to Insights</>
-                        : <><Sparkles className="h-3.5 w-3.5" /> Approve & Add to Insights</>}
-                    </button>
-
-                    {/* Per-issue failures from the last save — retry only resends these */}
-                    {insightsFailures && insightsFailures.length > 0 && (
-                      <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 space-y-2">
-                        <p className="text-[11px] font-semibold text-red-400 flex items-center gap-1.5">
-                          <AlertCircle className="h-3.5 w-3.5" /> {insightsFailures.length} issue{insightsFailures.length !== 1 ? "s" : ""} couldn't be saved
+                      {/* Score & Verdict */}
+                      <div className="space-y-1.5 pt-1">
+                        <div className="flex items-baseline gap-3 flex-wrap">
+                          <span className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground font-mono">
+                            {result.overallScore}
+                          </span>
+                          <span className="text-sm font-medium text-muted-foreground">/ 100</span>
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border border-border/60 ${scoreColor(result.overallScore)}`}>
+                            {scoreLabel(result.overallScore)}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground leading-relaxed max-w-xl">
+                          {result.overallScore >= 80
+                            ? "The interface demonstrates a strong user experience foundation with high consistency and minimal friction."
+                            : result.overallScore >= 60
+                            ? "The interface is functional but contains noticeable UX friction, hierarchy gaps, and inconsistent patterns."
+                            : "Significant usability barriers, unclear visual hierarchy, and friction points require immediate remediation."}
                         </p>
-                        <ul className="space-y-1">
-                          {insightsFailures.map(f => {
-                            const failedIssue = result.issues.find(i => i.id === f.issueId);
-                            return (
-                              <li key={f.issueId} className="text-[10px] text-muted-foreground leading-relaxed">
-                                <span className="text-foreground font-medium">{failedIssue?.title || f.issueId}</span> — {f.error}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                        <button onClick={retryFailedInsights} disabled={addingToInsights}
-                          className="flex items-center gap-1.5 rounded-lg bg-red-500 hover:bg-red-400 disabled:opacity-50 px-3 py-1.5 text-[11px] font-semibold text-white transition-all"
+                      </div>
+
+                      {/* Severity breakdown inline */}
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap pt-1">
+                        <span className="font-semibold text-foreground">{result.issues.length} findings</span>
+                        <span>·</span>
+                        {(["critical", "high", "medium", "low"] as const).map(s => {
+                          const count = severityCounts?.[s] || 0;
+                          if (!count) return null;
+                          const meta = SEVERITY_META[s];
+                          return (
+                            <span key={s} className="flex items-center gap-1.5 text-[11px]">
+                              <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                              <span className="font-medium text-foreground">{count}</span>
+                              <span className="capitalize">{s}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+
+                      {/* Action CTA */}
+                      <div className="pt-2 flex items-center gap-3">
+                        <button
+                          onClick={addToInsights}
+                          disabled={addingToInsights || addedToInsights}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-60 px-4 py-2 text-xs font-semibold text-black transition-all shadow-sm"
                         >
-                          {addingToInsights
-                            ? <><Loader2 className="h-3 w-3 animate-spin" /> Retrying…</>
-                            : <><RefreshCw className="h-3 w-3" /> Retry Failed Only</>}
+                          {addingToInsights ? (
+                            <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Adding to Insights…</>
+                          ) : addedToInsights ? (
+                            insightsFailures?.length ? (
+                              <><AlertCircle className="h-3.5 w-3.5" /> Partially Added ({insightsFailures.length} failed)</>
+                            ) : (
+                              <><CheckCircle2 className="h-3.5 w-3.5" /> Added to Insights</>
+                            )
+                          ) : (
+                            <><Sparkles className="h-3.5 w-3.5" /> Approve & Add to Insights</>
+                          )}
                         </button>
                       </div>
+
+                      {/* Per-issue save failures banner */}
+                      {insightsFailures && insightsFailures.length > 0 && (
+                        <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3 space-y-2 mt-2">
+                          <p className="text-[11px] font-semibold text-red-400 flex items-center gap-1.5">
+                            <AlertCircle className="h-3.5 w-3.5" /> {insightsFailures.length} issue{insightsFailures.length !== 1 ? "s" : ""} couldn't be saved
+                          </p>
+                          <ul className="space-y-1">
+                            {insightsFailures.map(f => {
+                              const failedIssue = result.issues.find(i => i.id === f.issueId);
+                              return (
+                                <li key={f.issueId} className="text-[10px] text-muted-foreground leading-relaxed">
+                                  <span className="text-foreground font-medium">{failedIssue?.title || f.issueId}</span> — {f.error}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                          <button onClick={retryFailedInsights} disabled={addingToInsights}
+                            className="flex items-center gap-1.5 rounded-md bg-red-500 hover:bg-red-400 disabled:opacity-50 px-3 py-1.5 text-[11px] font-semibold text-white transition-all"
+                          >
+                            {addingToInsights ? <><Loader2 className="h-3 w-3 animate-spin" /> Retrying…</> : <><RefreshCw className="h-3 w-3" /> Retry Failed Only</>}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── 2. EXECUTIVE SUMMARY ──────────────────────────────── */}
+                    <section className="space-y-2 pb-6 border-b border-border/40">
+                      <h2 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        Executive Summary
+                      </h2>
+                      <p className="text-xs text-foreground/90 leading-relaxed font-normal">
+                        {result.summary}
+                      </p>
+                    </section>
+
+                    {/* ── 3. WHAT TO FIX FIRST ──────────────────────────────── */}
+                    {topPriorityIssues.length > 0 && (
+                      <section className="space-y-3 pb-6 border-b border-border/40">
+                        <h2 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                          What to Fix First
+                        </h2>
+                        <ol className="space-y-2">
+                          {topPriorityIssues.map((issue, i) => (
+                            <li key={issue.id} className="flex items-start gap-2.5 text-xs leading-relaxed">
+                              <span className="font-mono text-[11px] font-bold text-muted-foreground/70 shrink-0 mt-0.5">
+                                {i + 1}.
+                              </span>
+                              <div className="min-w-0">
+                                <span className="font-semibold text-foreground">{issue.title}</span>
+                                <span className="text-muted-foreground ml-1.5 text-[11px]">
+                                  — {issue.change}
+                                </span>
+                              </div>
+                            </li>
+                          ))}
+                        </ol>
+                      </section>
                     )}
 
-                    {/* Improve Analysis CTA / panel */}
-                    {!showEnhancePanel ? (
-                      <button onClick={() => setShowEnhancePanel(true)}
-                        className="w-full flex items-center gap-3 rounded-xl border border-border hover:border-foreground/30 bg-card hover:bg-muted p-3.5 text-left transition-all group"
-                      >
-                        <div className="h-8 w-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center shrink-0">
-                          <ImagePlus className="h-4 w-4 text-sky-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-semibold text-foreground">Improve Analysis</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">Upload screenshots from key pages (Dashboard, Settings, Checkout, Profile) for a multi-screen review.</p>
-                        </div>
-                        <Plus className="h-3.5 w-3.5 text-muted-foreground group-hover:text-foreground/70 transition-colors shrink-0" />
-                      </button>
-                    ) : (
-                      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                            <ImagePlus className="h-3.5 w-3.5 text-sky-400" /> Add Screenshots
-                          </p>
-                          <button onClick={() => setShowEnhancePanel(false)} className="text-muted-foreground hover:text-foreground/70 transition-colors">
-                            <X className="h-3.5 w-3.5" />
+                    {/* ── 4. DETAILED FINDINGS ──────────────────────────────── */}
+                    <section className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 pb-2 flex-wrap">
+                        <div className="flex items-center gap-3">
+                          <h2 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Findings ({filteredIssues.length})
+                          </h2>
+                          <button
+                            onClick={toggleAllIssues}
+                            className="text-[10px] text-muted-foreground/70 hover:text-foreground transition-colors"
+                          >
+                            {expandedIssueIds.size === filteredIssues.length ? "Collapse all" : "Expand all"}
                           </button>
                         </div>
 
-                        {enhanceScreens.length > 0 ? (
-                          <div className="flex flex-wrap gap-2">
-                            {enhanceScreens.map((s, i) => (
-                              <div key={i} className="relative group">
-                                <img src={s.dataUrl} alt={s.label} className="h-14 w-20 object-cover rounded-lg border border-border" />
-                                <button onClick={() => setEnhanceScreens(prev => prev.filter((_,idx) => idx !== i))}
-                                  className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-muted hover:bg-red-500 text-muted-foreground hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
-                                  <X className="h-2.5 w-2.5" />
-                                </button>
-                                <p className="text-[8px] text-muted-foreground mt-0.5 text-center truncate max-w-[80px]">{s.label}</p>
-                              </div>
+                        {/* Filter controls */}
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={severityFilter}
+                            onChange={e => setSeverityFilter(e.target.value)}
+                            className="bg-muted/30 border border-border/50 rounded-md px-2 py-1 text-[11px] text-foreground focus:outline-none hover:bg-muted/50 transition-colors"
+                          >
+                            <option value="all">All Severities</option>
+                            {(["critical","high","medium","low"] as const).map(s => (
+                              <option key={s} value={s}>{SEVERITY_META[s].label}</option>
                             ))}
-                            <button onClick={() => enhanceFileRef.current?.click()}
-                              className="h-14 w-20 rounded-lg border-2 border-dashed border-border hover:border-foreground/30 flex items-center justify-center text-muted-foreground hover:text-foreground/70 transition-colors">
-                              <Plus className="h-4 w-4" />
+                          </select>
+                          <select
+                            value={categoryFilter}
+                            onChange={e => setCategoryFilter(e.target.value)}
+                            className="bg-muted/30 border border-border/50 rounded-md px-2 py-1 text-[11px] text-foreground focus:outline-none hover:bg-muted/50 transition-colors"
+                          >
+                            <option value="all">All Categories</option>
+                            {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Findings list */}
+                      <div className="space-y-4">
+                        {issueGroups.map(group => {
+                          const isGeneral = group.screenshotIndex === null;
+                          const thumbnail = group.screenshotIndex !== null ? previewImages[group.screenshotIndex] : undefined;
+                          const heading = isGeneral
+                            ? "General / Cross-screen"
+                            : thumbnail?.label || group.issues[0]?.screen || `Screenshot ${group.screenshotIndex! + 1}`;
+
+                          return (
+                            <div key={group.key} className="space-y-1">
+                              {issueGroups.length > 1 && (
+                                <div className="flex items-center gap-2 pt-3 pb-1.5 border-b border-border/40">
+                                  {thumbnail && (
+                                    <img src={thumbnail.dataUrl} alt={heading} className="h-6 w-8 object-cover rounded border border-border shrink-0" />
+                                  )}
+                                  <span className="text-xs font-bold text-foreground truncate">{heading}</span>
+                                  <span className="text-[10px] text-muted-foreground font-mono">({group.issues.length})</span>
+                                </div>
+                              )}
+                              <div className="divide-y divide-border/20">
+                                {group.issues.map((issue, i) => {
+                                  const globalIdx = result.issues.findIndex(item => item.id === issue.id);
+                                  const displayIdx = globalIdx >= 0 ? globalIdx : i;
+                                  return (
+                                    <FindingItem
+                                      key={issue.id}
+                                      issue={issue}
+                                      index={displayIdx}
+                                      open={expandedIssueIds.has(issue.id)}
+                                      onToggle={() => toggleIssue(issue.id)}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                        {filteredIssues.length === 0 && (
+                          <p className="text-center py-8 text-muted-foreground italic text-xs">No findings match the selected filters.</p>
+                        )}
+                      </div>
+                    </section>
+
+                    {/* ── 5. DEEPER REVIEW (SCREENSHOTS ENHANCEMENT) ─────────── */}
+                    <section className="pt-6 border-t border-border/40 space-y-3">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h3 className="text-xs font-semibold text-foreground">Want a deeper multi-screen review?</h3>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                            Upload screenshots of key user flows (e.g. Dashboard, Settings, Checkout) to extend this review across multiple views.
+                          </p>
+                        </div>
+                        {!showEnhancePanel && (
+                          <button
+                            onClick={() => setShowEnhancePanel(true)}
+                            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border/60 hover:border-foreground/30 hover:bg-muted/40 text-xs font-semibold text-foreground transition-all"
+                          >
+                            <Plus className="h-3.5 w-3.5 text-sky-400" />
+                            Add Screenshots
+                          </button>
+                        )}
+                      </div>
+
+                      {showEnhancePanel && (
+                        <div className="rounded-xl border border-border bg-card p-4 space-y-3 mt-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                              <ImagePlus className="h-3.5 w-3.5 text-sky-400" /> Add Screenshots
+                            </p>
+                            <button onClick={() => setShowEnhancePanel(false)} className="text-muted-foreground hover:text-foreground/70 transition-colors">
+                              <X className="h-3.5 w-3.5" />
                             </button>
                           </div>
-                        ) : (
-                          <div onClick={() => enhanceFileRef.current?.click()}
-                            className="border-2 border-dashed border-border hover:border-foreground/30 rounded-xl p-5 text-center cursor-pointer transition-all">
-                            <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1.5" />
-                            <p className="text-[11px] text-muted-foreground font-semibold">Click to add or paste (Ctrl+V)</p>
-                            <p className="text-[10px] text-muted-foreground/70 mt-0.5">Dashboard, Settings, Checkout, Profile, etc.</p>
-                          </div>
-                        )}
-                        <input ref={enhanceFileRef} type="file" accept="image/*" multiple onChange={handleEnhanceFileSelect} className="hidden" />
 
-                        <button onClick={runEnhancement} disabled={enhancing || enhanceScreens.length === 0}
-                          className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-black transition-all">
-                          {enhancing
-                            ? <><div className="h-3 w-3 border-2 border-black border-t-transparent rounded-full animate-spin" /> Updating...</>
-                            : <><Sparkles className="h-3.5 w-3.5" /> Improve Analysis ({enhanceScreens.length} screen{enhanceScreens.length !== 1 ? "s" : ""})</>}
-                        </button>
-                      </div>
-                    )}
+                          {enhanceScreens.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {enhanceScreens.map((s, i) => (
+                                <div key={i} className="relative group">
+                                  <img src={s.dataUrl} alt={s.label} className="h-14 w-20 object-cover rounded-lg border border-border" />
+                                  <button onClick={() => setEnhanceScreens(prev => prev.filter((_,idx) => idx !== i))}
+                                    className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-muted hover:bg-red-500 text-muted-foreground hover:text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all">
+                                    <X className="h-2.5 w-2.5" />
+                                  </button>
+                                  <p className="text-[8px] text-muted-foreground mt-0.5 text-center truncate max-w-[80px]">{s.label}</p>
+                                </div>
+                              ))}
+                              <button onClick={() => enhanceFileRef.current?.click()}
+                                className="h-14 w-20 rounded-lg border-2 border-dashed border-border hover:border-foreground/30 flex items-center justify-center text-muted-foreground hover:text-foreground/70 transition-colors">
+                                <Plus className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div onClick={() => enhanceFileRef.current?.click()}
+                              className="border-2 border-dashed border-border hover:border-foreground/30 rounded-xl p-5 text-center cursor-pointer transition-all">
+                              <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1.5" />
+                              <p className="text-[11px] text-muted-foreground font-semibold">Click to add or paste (Ctrl+V)</p>
+                              <p className="text-[10px] text-muted-foreground/70 mt-0.5">Dashboard, Settings, Checkout, Profile, etc.</p>
+                            </div>
+                          )}
+                          <input ref={enhanceFileRef} type="file" accept="image/*" multiple onChange={handleEnhanceFileSelect} className="hidden" />
 
-                    {/* Filters */}
-                    <div className="flex items-center gap-2 flex-wrap pt-1">
-                      <span className="text-[10px] text-muted-foreground font-mono">{filteredIssues.length}/{result.issues.length}</span>
-                      <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}
-                        className="bg-background border border-border rounded-lg px-2 py-1 text-[10px] text-foreground focus:outline-none">
-                        <option value="all">All Severities</option>
-                        {(["critical","high","medium","low"] as const).map(s => <option key={s} value={s}>{SEVERITY_META[s].label}</option>)}
-                      </select>
-                      <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
-                        className="bg-background border border-border rounded-lg px-2 py-1 text-[10px] text-foreground focus:outline-none">
-                        <option value="all">All Categories</option>
-                        {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-
-                    {/* Issue list — one collapsible section per screenshot, "General / Cross-screen" pinned first */}
-                    <div className="space-y-2">
-                      {issueGroups.map(group => (
-                        <IssueGroupSection
-                          key={group.key}
-                          group={group}
-                          thumbnail={group.screenshotIndex !== null ? previewImages[group.screenshotIndex] : undefined}
-                          collapsed={collapsedGroups.has(group.key)}
-                          onToggle={() => toggleGroup(group.key)}
-                        />
-                      ))}
-                      {filteredIssues.length === 0 && (
-                        <p className="text-center py-10 text-muted-foreground italic text-xs">No issues match the filter.</p>
+                          <button onClick={runEnhancement} disabled={enhancing || enhanceScreens.length === 0}
+                            className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 disabled:opacity-50 px-4 py-2 text-xs font-semibold text-black transition-all">
+                            {enhancing
+                              ? <><div className="h-3 w-3 border-2 border-black border-t-transparent rounded-full animate-spin" /> Updating...</>
+                              : <><Sparkles className="h-3.5 w-3.5" /> Improve Analysis ({enhanceScreens.length} screen{enhanceScreens.length !== 1 ? "s" : ""})</>}
+                          </button>
+                        </div>
                       )}
-                    </div>
+                    </section>
 
                   </div>
                 )}
@@ -1152,7 +1328,9 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
                       className="rounded-xl border border-border/50 bg-card hover:border-border transition-colors overflow-hidden"
                     >
                       <div className="flex items-center gap-3 p-3">
-                        <ScoreRing score={entry.overallScore} size={10} />
+                        <span className={`shrink-0 font-mono font-bold text-xs px-2 py-0.5 rounded-md bg-muted/60 border border-border/40 ${scoreColor(entry.overallScore)}`}>
+                          {entry.overallScore}
+                        </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-[11px] font-bold text-foreground truncate">{entry.pageTitle}</p>
                           <p className="text-[9px] text-muted-foreground font-mono mt-0.5 flex items-center gap-1.5">
@@ -1235,8 +1413,7 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
                   placeholder="https://yourproduct.com"
                   value={urlInput}
                   onChange={e => setUrlInput(e.target.value)}
-                  onBlur={() => { if (urlInput.trim()) setPreviewUrl(urlInput.trim()); }}
-                  onKeyDown={e => e.key === "Enter" && runAudit()}
+                  onKeyDown={e => e.key === "Enter" && handleUrlSubmit()}
                   className="w-full bg-transparent px-5 pt-4 pb-2 text-sm text-foreground focus:outline-none placeholder:text-muted-foreground"
                 />
               ) : (
@@ -1295,7 +1472,7 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
 
                 {/* Right: audit button */}
                 <button
-                  onClick={runAudit}
+                  onClick={handleUrlSubmit}
                   disabled={running || (activeTab === "url" ? !urlInput.trim() : uploadedImages.length === 0)}
                   className="flex items-center justify-center h-8 w-8 rounded-full bg-sky-500 hover:bg-sky-400 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg"
                 >
@@ -1325,7 +1502,9 @@ export function UiAuditWorkspace({ onSavedToInsights }: { onSavedToInsights?: ()
                       onClick={() => restoreFromHistory(entry)}
                       className="w-full flex items-center gap-3 rounded-xl border border-border bg-card hover:border-foreground/20 hover:bg-muted/40 p-3 text-left transition-all"
                     >
-                      <ScoreRing score={entry.overallScore} size={10} />
+                      <span className={`shrink-0 font-mono font-bold text-xs px-2 py-0.5 rounded-md bg-muted/60 border border-border/40 ${scoreColor(entry.overallScore)}`}>
+                        {entry.overallScore}
+                      </span>
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-semibold text-foreground truncate">{entry.pageTitle}</p>
                         <p className="text-[10px] text-muted-foreground font-mono mt-0.5 flex items-center gap-1.5">

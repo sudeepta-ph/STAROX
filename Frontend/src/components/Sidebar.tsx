@@ -81,13 +81,17 @@ const Sidebar = () => {
   // (sources added, decisions generated); PRD and Execution unlock from
   // either that same pipeline (a solution) or the idea-input one-shot flow
   // (an idea PRD) — whichever path got there first.
-  const { inputs, decisions, solutions, ideaPrd } = usePmxStore();
+  const { inputs, decisions, solutions, ideaPrd, role } = usePmxStore();
   const hasExistingProductPipeline = inputs.length > 0 || decisions.length > 0;
   const hasPrd = hasExistingProductPipeline || solutions.length > 0 || !!ideaPrd;
   const NAV_GATES: Record<string, boolean> = {
     "/pmx/insights": hasExistingProductPipeline,
     "/pmx/prd": hasPrd,
     "/pmx/execution": hasPrd,
+    // Settings is owner/admin territory — server-enforced on every
+    // settings-backing endpoint; this just keeps members from seeing a link
+    // that would redirect them straight back out.
+    "/pmx/settings": role !== "member",
   };
 
   const currentNav = (isPmxRoute ? pmxNav : mainNav).filter((item) => {

@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
+import { usePmxStore, getPmxHeaders, type PmxWorkspaceMember } from "@/lib/pmxStore";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Save, Sparkles, Bell, Cpu, Shield, Users, Lock,
+  Save, Bell, Cpu, Users, Lock,
   Zap, ChevronRight, Package, Check,
-  AlertCircle, RefreshCw, Database, Key, Plug, Trash2,
-  DownloadCloud, Layers, ChevronDown, Plus, X, Activity,
+  AlertCircle, RefreshCw, Database, Trash2,
+  Layers, ChevronDown, Plus, X, Activity,
+  Copy, UserMinus, Crown,
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import ProductSwitcher, { type Product } from "@/components/pmx/ProductSwitcher";
+import { useAuthStore } from "@/lib/authStore";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
@@ -54,14 +56,6 @@ const NAV_GROUPS = [
       { id: "permissions", label: "Permissions",  icon: Lock   },
     ],
   },
-  {
-    label: "Advanced",
-    items: [
-      { id: "apikeys",    label: "API Keys",      icon: Key         },
-      { id: "integrations",label: "Integrations", icon: Plug        },
-      { id: "dataexport", label: "Data & Export", icon: DownloadCloud },
-    ],
-  },
 ];
 
 // ── Small reusable primitives ─────────────────────────────────────────────────
@@ -74,8 +68,8 @@ function SectionHeader({ title, description }: { title: string; description: str
   );
 }
 
-function Toggle({ value, onChange, label, description }: {
-  value: boolean; onChange: (v: boolean) => void; label: string; description?: string;
+function Toggle({ value, onChange, label, description, disabled }: {
+  value: boolean; onChange: (v: boolean) => void; label: string; description?: string; disabled?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between py-3 border-b border-border/30 last:border-0">
@@ -83,8 +77,8 @@ function Toggle({ value, onChange, label, description }: {
         <p className="text-xs font-medium text-foreground">{label}</p>
         {description && <p className="text-[10px] text-muted-foreground mt-0.5">{description}</p>}
       </div>
-      <button onClick={() => onChange(!value)}
-        className={`relative h-5 w-9 rounded-full transition-colors ${value ? "bg-primary" : "bg-border"}`}>
+      <button onClick={() => !disabled && onChange(!value)} disabled={disabled}
+        className={`relative h-5 w-9 rounded-full transition-colors ${value ? "bg-primary" : "bg-border"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}>
         <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${value ? "translate-x-4" : "translate-x-0.5"}`} />
       </button>
     </div>
@@ -109,14 +103,12 @@ function TextInput({ value, onChange, placeholder, type = "text" }: {
   );
 }
 
-function Select({ value, onChange, children }: {
-  value: string; onChange: (v: string) => void; children: React.ReactNode;
+function TextArea({ value, onChange, placeholder, rows = 3 }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; rows?: number;
 }) {
   return (
-    <select value={value} onChange={e => onChange(e.target.value)}
-      className="w-full bg-background border border-border text-foreground rounded-lg px-2.5 py-2 text-xs focus:outline-none transition-colors">
-      {children}
-    </select>
+    <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+      className="w-full bg-background border border-border focus:border-ring rounded-lg px-3 py-2 text-xs text-foreground focus:outline-none placeholder:text-muted-foreground transition-colors resize-none" />
   );
 }
 
@@ -436,17 +428,98 @@ function UsageCard() {
   );
 }
 
+// ── Team & Users primitives ───────────────────────────────────────────────────
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts[1]?.[0] || "")).toUpperCase();
+}
+
+const ROLE_BADGE_CLASS: Record<string, string> = {
+  owner: "text-amber-400 bg-amber-500/10 border-amber-500/20",
+  admin: "text-sky-400 bg-sky-500/10 border-sky-500/20",
+  member: "text-muted-foreground bg-muted border-border",
+};
+
+function MemberRow({
+  member, viewerRole, viewerUserId, onChangeRole, onRemove,
+}: {
+  member: PmxWorkspaceMember;
+  viewerRole: "owner" | "admin" | "member" | null;
+  viewerUserId: string | undefined;
+  onChangeRole: (memberId: string, role: "admin" | "member") => void;
+  onRemove: (memberId: string) => void;
+}) {
+  const isSelf = member.userId === viewerUserId;
+  const isOwnerRow = member.role === "owner";
+  // Only the owner may touch admin-tier rows; anyone with admin+ can manage
+  // plain members. Nobody can touch their own row or the owner's row here.
+  const canManage = !isSelf && !isOwnerRow && (viewerRole === "owner" || (viewerRole === "admin" && member.role === "member"));
+
+  return (
+    <div className="flex items-center gap-3 py-3 border-b border-border/30 last:border-0">
+      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-[11px] font-semibold text-foreground shrink-0 overflow-hidden">
+        {member.avatar ? <img src={member.avatar} alt="" className="h-full w-full object-cover" /> : initials(member.name || member.email || "?")}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-foreground truncate flex items-center gap-1.5">
+          {member.name || "Unnamed"}
+          {isSelf && <span className="text-[10px] text-muted-foreground">(you)</span>}
+        </p>
+        <p className="text-[11px] text-muted-foreground truncate">{member.email}</p>
+      </div>
+      <span className={`shrink-0 flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border capitalize ${ROLE_BADGE_CLASS[member.role]}`}>
+        {isOwnerRow && <Crown className="h-2.5 w-2.5" />}
+        {member.role}
+      </span>
+      {canManage && (
+        <div className="shrink-0 flex items-center gap-1">
+          <select
+            value={member.role}
+            onChange={(e) => onChangeRole(member._id, e.target.value as "admin" | "member")}
+            className="bg-background border border-border rounded-lg px-1.5 py-1 text-[10px] text-foreground focus:outline-none"
+          >
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button
+            onClick={() => onRemove(member._id)}
+            title="Remove from workspace"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <UserMinus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function PmxSettings() {
-  const { understanding, fetchUnderstanding, deleteProject, projectId, setProjectId, workspaces, fetchWorkspaces, startFreshWorkspace } = usePmxStore();
+  const {
+    understanding, fetchUnderstanding, deleteProject, projectId, setProjectId, workspaces, fetchWorkspaces, startFreshWorkspace,
+    role, inputs, fetchInputs, members, membersLoading, fetchMembers, changeMemberRole, removeMember,
+    inviteCode, fetchInviteCode, generateInviteCode, revokeInviteCode,
+  } = usePmxStore();
   const [deleting, setDeleting] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const viewerUserId = useAuthStore((s) => s.user?.uid);
 
   const [activeSection, setActiveSection] = useState("product");
   const [saveStatus, setSaveStatus]       = useState<"idle" | "saved" | "saving" | "unsaved">("idle");
   const [unsavedWarning, setUnsavedWarning] = useState(false);
   const [pendingSection, setPendingSection] = useState<string | null>(null);
+
+  // Settings is owner/admin territory — this is a client-side nicety only;
+  // every settings-backing endpoint enforces the same restriction server-side.
+  useEffect(() => {
+    if (role === "member") {
+      toast({ title: "Settings are managed by workspace owners and admins." });
+      navigate("/pmx/overview");
+    }
+  }, [role, navigate, toast]);
 
   // ── Product fields ────────────────────────────────────────────────────────
   const [name,             setName]             = useState(understanding?.productSummary?.name || "");
@@ -457,18 +530,21 @@ export default function PmxSettings() {
   const [targetAudience,   setTargetAudience]   = useState(understanding?.targetAudience || "");
   const [valueProposition, setValueProposition] = useState(understanding?.valueProposition || "");
 
-  // ── AI fields ─────────────────────────────────────────────────────────────
-  const [model,         setModel]         = useState("openai/gpt-4o-mini");
-  const [autoAnalysis,  setAutoAnalysis]  = useState(true);
-  const [deepReasoning, setDeepReasoning] = useState(false);
+  // ── Workspace fields ──────────────────────────────────────────────────────
+  const [workspaceName,        setWorkspaceName]        = useState(understanding?.workspaceName || "");
+  const [workspaceDescription, setWorkspaceDescription] = useState(understanding?.workspaceDescription || "");
+  const [inviteLinksEnabled,   setInviteLinksEnabled]   = useState(understanding?.inviteLinksEnabled ?? true);
 
-  // ── Automation fields ─────────────────────────────────────────────────────
+  // ── AI fields ─────────────────────────────────────────────────────────────
+  const [autoAnalysis, setAutoAnalysis] = useState(understanding?.aiSettings?.autoAnalysis ?? false);
+
+  // ── Automation fields (local-only — not part of this redesign's scope) ───
   const [schedule,     setSchedule]     = useState("daily");
   const [runOnPush,    setRunOnPush]    = useState(false);
   const [runOnReview,  setRunOnReview]  = useState(true);
   const [runOnError,   setRunOnError]   = useState(true);
 
-  // ── Notification fields ───────────────────────────────────────────────────
+  // ── Notification fields (local-only — not part of this redesign's scope) ─
   const [slackNotifs,  setSlackNotifs]  = useState(false);
   const [emailNotifs,  setEmailNotifs]  = useState(true);
   const [weeklyReport, setWeeklyReport] = useState(true);
@@ -497,8 +573,17 @@ export default function PmxSettings() {
       setBusinessModel(understanding.businessModel || "");
       setTargetAudience(understanding.targetAudience || "");
       setValueProposition(understanding.valueProposition || "");
+      setWorkspaceName(understanding.workspaceName || "");
+      setWorkspaceDescription(understanding.workspaceDescription || "");
+      setInviteLinksEnabled(understanding.inviteLinksEnabled ?? true);
+      setAutoAnalysis(understanding.aiSettings?.autoAnalysis ?? false);
     }
   }, [understanding]);
+
+  useEffect(() => {
+    if (activeSection === "knowledge") fetchInputs();
+    if (activeSection === "team") { fetchMembers(); fetchInviteCode(); }
+  }, [activeSection]);
 
   // Marked dirty explicitly by each field's own onChange handler below —
   // NOT by a blanket effect watching every field, which used to fire
@@ -541,6 +626,8 @@ export default function PmxSettings() {
           customerSegments: understanding?.customerSegments || [],
           businessGoals: understanding?.businessGoals || [],
           customerJourney: understanding?.customerJourney || [],
+          workspaceName, workspaceDescription, inviteLinksEnabled,
+          aiSettings: { autoAnalysis },
         }),
       });
       const json = await res.json();
@@ -564,7 +651,35 @@ export default function PmxSettings() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [name, oneLiner, category, stage, businessModel, targetAudience, valueProposition]);
+  }, [name, oneLiner, category, stage, businessModel, targetAudience, valueProposition, workspaceName, workspaceDescription, inviteLinksEnabled, autoAnalysis]);
+
+  const handleCopyInviteCode = () => {
+    if (!inviteCode?.code) return;
+    navigator.clipboard.writeText(inviteCode.code);
+    toast({ title: "Invite code copied" });
+  };
+
+  const handleGenerateInviteCode = async () => {
+    await generateInviteCode();
+    toast({ title: "New invite code generated", description: "The previous code no longer works." });
+  };
+
+  const handleRevokeInviteCode = async () => {
+    if (!window.confirm("Revoke the active invite code? Nobody will be able to join with it until you generate a new one.")) return;
+    await revokeInviteCode();
+    toast({ title: "Invite code revoked" });
+  };
+
+  const handleRemoveMember = async (memberId: string) => {
+    if (!window.confirm("Remove this person from the workspace?")) return;
+    const ok = await removeMember(memberId);
+    toast(ok ? { title: "Member removed" } : { variant: "destructive", title: "Couldn't remove member" });
+  };
+
+  const handleChangeMemberRole = async (memberId: string, role: "admin" | "member") => {
+    const ok = await changeMemberRole(memberId, role);
+    toast(ok ? { title: `Role updated to ${role}` } : { variant: "destructive", title: "Couldn't update role" });
+  };
 
   // ── Section content ───────────────────────────────────────────────────────
   const renderSection = () => {
@@ -587,79 +702,147 @@ export default function PmxSettings() {
             <p className="text-xs font-bold text-destructive flex items-center gap-2">
               <AlertCircle className="h-3.5 w-3.5" /> Danger Zone
             </p>
-            <p className="text-[10px] text-muted-foreground">Permanently delete this product and all its data — sources, signals, insights, PRDs, and execution tasks. This cannot be undone.</p>
-            <button
-              type="button"
-              disabled={deleting}
-              onClick={async () => {
-                if (!window.confirm(`Delete "${name || "this product"}" and all its data? This cannot be undone.`)) return;
+            <p className="text-[10px] text-muted-foreground">
+              Permanently delete this product and all its data — sources, signals, insights, PRDs, and execution
+              tasks. Since a product and its workspace share the same container, this also removes every other
+              member's access. This cannot be undone.
+            </p>
+            {role !== "owner" ? (
+              <p className="text-[10px] text-muted-foreground/70 italic">Only the workspace owner can delete this product.</p>
+            ) : (
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={async () => {
+                  if (!window.confirm(`Delete "${name || "this product"}" and all its data? This cannot be undone.`)) return;
 
-                setDeleting(true);
-                const ok = await deleteProject(projectId);
-                setDeleting(false);
+                  setDeleting(true);
+                  const ok = await deleteProject(projectId);
+                  setDeleting(false);
 
-                if (!ok) {
-                  toast({ variant: "destructive", title: "Delete failed", description: "Could not delete product data. Please try again." });
-                  return;
-                }
+                  if (!ok) {
+                    toast({ variant: "destructive", title: "Delete failed", description: "Could not delete product data. Please try again." });
+                    return;
+                  }
 
-                toast({ variant: "destructive", title: "Product deleted", description: "All sources, insights, and execution data have been removed." });
-                setSaveStatus("idle");
+                  toast({ variant: "destructive", title: "Product deleted", description: "All sources, insights, and execution data have been removed." });
+                  setSaveStatus("idle");
 
-                const remaining = workspaces.filter(w => w.projectId !== projectId);
-                if (remaining[0]) setProjectId(remaining[0].projectId);
-                else startFreshWorkspace();
-                fetchWorkspaces();
-              }}
-              className="flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-background hover:bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> {deleting ? "Deleting..." : "Delete Product"}
-            </button>
+                  const remaining = workspaces.filter(w => w.projectId !== projectId);
+                  if (remaining[0]) setProjectId(remaining[0].projectId);
+                  else startFreshWorkspace();
+                  fetchWorkspaces();
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-background hover:bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> {deleting ? "Deleting..." : "Delete Product"}
+              </button>
+            )}
           </div>
         </form>
       );
       case "workspace": return (
-        <div>
-          <SectionHeader title="Workspace Settings" description="General configuration for this PMX workspace." />
-          <ComingSoon icon={Layers} message="Workspace settings — renaming, billing, and domain config — coming soon." />
-        </div>
+        <form onSubmit={handleSave} className="space-y-5">
+          <SectionHeader title="Workspace Settings" description="The team/environment PMX is being used in — distinct from the product itself." />
+          <Field label="Workspace Name">
+            <TextInput value={workspaceName} onChange={v => { setWorkspaceName(v); markDirty(); }} placeholder={name || "My Workspace"} />
+          </Field>
+          <Field label="Workspace Description">
+            <TextArea value={workspaceDescription} onChange={v => { setWorkspaceDescription(v); markDirty(); }} placeholder="What this workspace is for..." />
+          </Field>
+          <div className="rounded-xl border border-border bg-card/30 px-4">
+            <Toggle
+              value={inviteLinksEnabled}
+              onChange={v => { setInviteLinksEnabled(v); markDirty(); }}
+              label="Allow people to join via invite code"
+              description="Turning this off pauses the active code without revoking it or removing current members"
+              disabled={role !== "owner" && role !== "admin"}
+            />
+          </div>
+        </form>
       );
       case "ai": return (
         <div className="space-y-5">
-          <SectionHeader title="AI Engine Configuration" description="Control how PMX reasons, which models it uses, and analysis depth." />
-          <Field label="Active LLM Model">
-            <Select value={model} onChange={v => { setModel(v); markDirty(); }}>
-              <option value="openai/gpt-4o-mini">GPT-4o Mini — Fast & Efficient</option>
-              <option value="openai/gpt-4o">GPT-4o — Deep Strategy</option>
-              <option value="anthropic/claude-3-5-sonnet">Claude 3.5 Sonnet — Best PRD Output</option>
-              <option value="deepseek/deepseek-r1">DeepSeek R1 — Engineering Reasoning</option>
-            </Select>
-          </Field>
-          <div className="rounded-xl border border-border bg-card/30 px-4 divide-y divide-border/40">
-            <Toggle value={autoAnalysis} onChange={v => { setAutoAnalysis(v); markDirty(); }} label="Auto-run Analysis" description="Re-analyzes automatically when sources change" />
-            <Toggle value={deepReasoning} onChange={v => { setDeepReasoning(v); markDirty(); }} label="Deep Reasoning Mode" description="Uses more tokens for higher quality recommendations (slower)" />
+          <SectionHeader title="AI Engine" description="How PMX's analysis engine runs for this workspace." />
+
+          <div className="rounded-xl border border-border bg-card/30 p-4 flex items-start gap-3">
+            <Cpu className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-foreground">DeepSeek Reasoner</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                PMX runs on a single fixed reasoning model across every workspace — there's no per-workspace model
+                switch to configure.
+              </p>
+            </div>
           </div>
+
+          <div className="rounded-xl border border-border bg-card/30 px-4">
+            <Toggle
+              value={autoAnalysis}
+              onChange={v => { setAutoAnalysis(v); markDirty(); }}
+              label="Auto-run analysis when a new source is added"
+              description="Otherwise, sources sit connected until you run analysis manually from Sources"
+            />
+          </div>
+
+          <div className="rounded-xl border border-border bg-card/30 p-4 space-y-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">AI Behavior</p>
+            <div className="space-y-2.5 text-[11px] text-muted-foreground leading-relaxed">
+              <p><span className="text-foreground font-medium">Proactive insights</span> — surfaced as Product Pulse on the Overview page as soon as they're detected.</p>
+              <p><span className="text-foreground font-medium">Risk detection</span> — every problem PMX finds is severity-scored (critical/high/medium/low).</p>
+              <p><span className="text-foreground font-medium">Decision tracking</span> — recommendations move through the Insights approve/reject flow and stay auditable.</p>
+              <p><span className="text-foreground font-medium">Context linking</span> — evidence, problems, and features are connected so nothing is analyzed in isolation.</p>
+            </div>
+          </div>
+
           <UsageCard />
         </div>
       );
-      case "knowledge": return (
-        <div>
-          <SectionHeader title="Knowledge Sources" description="Configure what data PMX learns from for this product." />
-          <ComingSoon icon={Database} message="Knowledge source pinning and source weighting coming soon." />
-        </div>
-      );
+      case "knowledge": {
+        const activeSources = inputs.filter(i => !i.isArchived);
+        const archivedSources = inputs.filter(i => i.isArchived);
+        return (
+          <div className="space-y-5">
+            <SectionHeader title="Knowledge Sources" description="These are the sources PMX uses to understand your product." />
+            {inputs.length === 0 ? (
+              <ComingSoon icon={Database} message="No sources connected yet. Add one from the Sources page to give PMX something to learn from." />
+            ) : (
+              <div className="space-y-4">
+                {activeSources.length > 0 && (
+                  <div className="rounded-xl border border-border bg-card/30 divide-y divide-border/30">
+                    {activeSources.map(input => (
+                      <SourceSettingsRow key={input._id} input={input} />
+                    ))}
+                  </div>
+                )}
+                {archivedSources.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Archived — excluded from analysis</p>
+                    <div className="rounded-xl border border-border/60 bg-card/10 divide-y divide-border/20 opacity-70">
+                      {archivedSources.map(input => (
+                        <SourceSettingsRow key={input._id} input={input} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
       case "automation": return (
         <div className="space-y-5">
           <SectionHeader title="Automation Center" description="Configure when PMX automatically runs analysis and generates reports." />
           <Field label="Analysis Schedule">
-            <Select value={schedule} onChange={v => { setSchedule(v); markDirty(); }}>
+            <select value={schedule} onChange={e => { setSchedule(e.target.value); markDirty(); }}
+              className="w-full bg-background border border-border text-foreground rounded-lg px-2.5 py-2 text-xs focus:outline-none transition-colors">
               <option value="1h">Every hour</option>
               <option value="2h">Every 2 hours</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
               <option value="monthly">Monthly</option>
               <option value="manual">Manual only</option>
-            </Select>
+            </select>
           </Field>
           <div className="rounded-xl border border-border bg-card/30 px-4 divide-y divide-border/40">
             <Toggle value={runOnPush} onChange={v => { setRunOnPush(v); markDirty(); }} label="Run after GitHub Push" description="Trigger analysis on new commits" />
@@ -679,11 +862,111 @@ export default function PmxSettings() {
           </div>
         </div>
       );
-      case "team":        return <div><SectionHeader title="Team & Users" description="Manage who has access to this PMX workspace." /><ComingSoon icon={Users} message="Team management coming soon. Your workspace is currently single-user." /></div>;
-      case "permissions": return <div><SectionHeader title="Permissions" description="Configure access levels and data visibility." /><ComingSoon icon={Lock} message="Permissions management available on Team plan." /></div>;
-      case "apikeys":     return <div><SectionHeader title="API Keys" description="Manage API keys for external integrations." /><ComingSoon icon={Key} message="API key management coming soon." /></div>;
-      case "integrations":return <div><SectionHeader title="Integrations" description="Connect third-party tools to PMX." /><ComingSoon icon={Plug} message="Native integrations panel coming soon." /></div>;
-      case "dataexport":  return <div><SectionHeader title="Data & Export" description="Export your product intelligence data." /><ComingSoon icon={DownloadCloud} message="Full data export coming soon." /></div>;
+      case "team": return (
+        <div className="space-y-6">
+          <div>
+            <SectionHeader title="Team & Users" description="People working on this product." />
+            {membersLoading && members.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4">Loading team…</p>
+            ) : (
+              <div className="rounded-xl border border-border bg-card/30 px-4">
+                {members.map(m => (
+                  <MemberRow
+                    key={m._id}
+                    member={m}
+                    viewerRole={role}
+                    viewerUserId={viewerUserId}
+                    onChangeRole={handleChangeMemberRole}
+                    onRemove={handleRemoveMember}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {(role === "owner" || role === "admin") && (
+            <div className="space-y-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Invite people to your workspace</p>
+                <p className="text-[11px] text-muted-foreground mt-1">Share a code with people you want to work with. They'll enter it to join this workspace.</p>
+              </div>
+
+              {inviteCode?.status === "active" ? (
+                <div className="rounded-xl border border-border bg-card/30 p-4 space-y-3">
+                  <div>
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-2">Invite Code</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className={`text-xl font-mono font-semibold tracking-widest ${inviteCode.code ? "text-foreground" : "text-muted-foreground/50"}`}>
+                        {inviteCode.code || "••••-••••"}
+                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={handleCopyInviteCode}
+                          disabled={!inviteCode.code}
+                          title={inviteCode.code ? "Copy code" : "Generate a new code to get one you can copy"}
+                          className="flex items-center gap-1.5 rounded-lg border border-border bg-background hover:bg-muted px-2.5 py-1.5 text-[11px] font-semibold text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <Copy className="h-3.5 w-3.5" /> Copy Code
+                        </button>
+                        <button
+                          onClick={handleGenerateInviteCode}
+                          title="Generate a new code (invalidates the current one)"
+                          className="flex items-center gap-1.5 rounded-lg border border-border bg-background hover:bg-muted px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" /> Generate New Code
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-3 border-t border-border/30">
+                    <p className="text-[10px] text-muted-foreground">
+                      Active · created {inviteCode.createdAt ? timeAgo(inviteCode.createdAt) : "recently"} ·{" "}
+                      {inviteCode.maxUses ? `${inviteCode.usageCount ?? 0}/${inviteCode.maxUses} uses` : "unlimited uses"}
+                    </p>
+                    <button onClick={handleRevokeInviteCode} className="text-[10px] font-semibold text-destructive hover:underline">
+                      Revoke
+                    </button>
+                  </div>
+                  {!inviteCode.code && (
+                    <p className="text-[10px] text-muted-foreground/60">Generate a new code to get one you can copy — codes aren't shown again after generation.</p>
+                  )}
+                </div>
+              ) : (
+                <button
+                  onClick={handleGenerateInviteCode}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-3.5 py-2 text-xs font-semibold text-primary-foreground transition-colors"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Generate Code
+                </button>
+              )}
+
+              <p className="text-[10px] text-muted-foreground/70">
+                Default role: <span className="font-semibold text-foreground">Member</span> — invite codes never grant Admin or Owner access.
+              </p>
+            </div>
+          )}
+        </div>
+      );
+      case "permissions": return (
+        <div>
+          <SectionHeader title="Permissions" description="Who can do what in this workspace." />
+          <div className="space-y-3">
+            {([
+              { id: "owner", title: "Owner", body: "Full control over the workspace — manage members, change permissions, configure AI and product settings, and delete the workspace or product." },
+              { id: "admin", title: "Admin", body: "Can manage the workspace and team — invite and remove members, and manage product/workspace/AI settings. Cannot delete the workspace or product, or manage other admins." },
+              { id: "member", title: "Member", body: "Can work with the product and PMX — use Insights, create and update PRDs, work Execution tickets, use Artifacts, and view History. Cannot access Settings or manage the team." },
+            ] as const).map(r => (
+              <div key={r.id} className={`rounded-xl border p-4 ${role === r.id ? "border-primary/40 bg-primary/5" : "border-border bg-card/30"}`}>
+                <p className="text-xs font-bold text-foreground flex items-center gap-2">
+                  {r.title}
+                  {role === r.id && <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">Your role</span>}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">{r.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
       default: return null;
     }
   };
@@ -812,6 +1095,71 @@ export default function PmxSettings() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Knowledge Sources row ─────────────────────────────────────────────────────
+const SOURCE_LEARNS: Record<string, string> = {
+  url: "Navigation, accessibility, responsiveness, and conversion friction on live screens.",
+  repo: "Architecture, technical debt, and the delivery constraints behind each decision.",
+  text: "Whatever context or notes were pasted in directly.",
+  file: "Structured content extracted from the uploaded file.",
+  support: "Recurring pain points and the language your users actually use.",
+  interview: "Direct customer sentiment and unprompted feedback.",
+  survey: "Aggregated user sentiment across a broader sample.",
+  analytics: "Where activation stalls, where users drop off, and which features carry retention.",
+  report: "Findings already synthesized by an external report.",
+};
+
+function SourceSettingsRow({ input }: { input: { _id: string; name: string; type: string; status: string; isArchived?: boolean; updatedAt?: string; createdAt: string } }) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
+
+  const toggleArchive = async () => {
+    setBusy(true);
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/inputs/${input._id}/archive`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ isArchived: !input.isArchived }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        usePmxStore.getState().fetchInputs();
+      } else {
+        toast({ variant: "destructive", title: "Couldn't update source" });
+      }
+    } catch {
+      toast({ variant: "destructive", title: "Couldn't update source" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-3 flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-foreground truncate">{input.name}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 capitalize">
+          {input.type} · {input.status} · synced {timeAgo(input.updatedAt || input.createdAt)}
+        </p>
+        <p className="text-[10px] text-muted-foreground/70 mt-1 leading-relaxed max-w-md">
+          {SOURCE_LEARNS[input.type] || "Context PMX uses when analyzing your product."}
+        </p>
+      </div>
+      <button
+        onClick={toggleArchive}
+        disabled={busy}
+        className={`shrink-0 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors disabled:opacity-50 ${
+          input.isArchived
+            ? "border-primary/30 text-primary hover:bg-primary/10"
+            : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+        }`}
+      >
+        {input.isArchived ? "Include in analysis" : "Archive"}
+      </button>
     </div>
   );
 }

@@ -1,44 +1,19 @@
-import { useState, useEffect, useRef } from "react";
-import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { usePmxStore, getPmxHeaders, type PmxUnderstanding } from "@/lib/pmxStore";
 import { Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { useToast } from "@/components/ui/use-toast";
-import { ArrowRight, Plus, ChevronRight, Github, Link2, BarChart3,
-  Activity, FileText, GitBranch, MessageSquare, Upload,
-  FolderOpen, LayoutGrid, TrendingUp, Loader2, Database, Sparkles,
-  BookOpen, Award, Clock } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  ChevronRight,
+  Database,
+  FileText,
+  Loader2,
+  Plus,
+  TrendingUp,
+} from "lucide-react";
 
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
-
-// ── Connector meta (kept for Recent Sources) ──────────────────────────────────
-const CONNECTOR_META: Record<string, { label: string; icon: any; color: string; bg: string; border: string }> = {
-  url:       { label: "Website",   icon: Link2,         color: "text-sky-400",     bg: "bg-sky-500/10",     border: "border-sky-500/20" },
-  repo:      { label: "GitHub",    icon: Github,        color: "text-purple-400",  bg: "bg-purple-500/10",  border: "border-purple-500/20" },
-  gitlab:    { label: "GitLab",    icon: GitBranch,     color: "text-orange-400",  bg: "bg-orange-500/10",  border: "border-orange-500/20" },
-  analytics: { label: "Analytics", icon: BarChart3,     color: "text-yellow-400",  bg: "bg-yellow-500/10",  border: "border-yellow-500/20" },
-  mixpanel:  { label: "Mixpanel",  icon: Activity,      color: "text-purple-400",  bg: "bg-purple-500/10",  border: "border-purple-500/20" },
-  posthog:   { label: "PostHog",   icon: Activity,      color: "text-blue-400",    bg: "bg-blue-500/10",    border: "border-blue-500/20" },
-  support:   { label: "Intercom",  icon: MessageSquare, color: "text-green-400",   bg: "bg-green-500/10",   border: "border-green-500/20" },
-  zendesk:   { label: "Zendesk",   icon: MessageSquare, color: "text-teal-400",    bg: "bg-teal-500/10",    border: "border-teal-500/20" },
-  interview: { label: "Interview", icon: MessageSquare, color: "text-pink-400",    bg: "bg-pink-500/10",    border: "border-pink-500/20" },
-  csv:       { label: "CSV",       icon: FileText,      color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
-  text:      { label: "PDF / Doc", icon: FolderOpen,    color: "text-zinc-400",    bg: "bg-zinc-500/10",    border: "border-zinc-500/20" },
-  report:    { label: "Report",    icon: LayoutGrid,    color: "text-indigo-400",  bg: "bg-indigo-500/10",  border: "border-indigo-500/20" },
-};
-function getConnectorMeta(type: string) {
-  return CONNECTOR_META[type] || { label: type, icon: Upload, color: "text-zinc-400", bg: "bg-zinc-500/10", border: "border-zinc-500/20" };
-}
-function getStatusStyle(status: string) {
-  const n = status?.toLowerCase() || "completed";
-  if (n === "queued")     return { bg: "bg-yellow-500/10",  border: "border-yellow-500/20",  text: "text-yellow-400",  label: "Queued"    };
-  if (n === "processing") return { bg: "bg-blue-500/10",    border: "border-blue-500/20",    text: "text-blue-400",    label: "Syncing"   };
-  if (n === "analyzing")  return { bg: "bg-purple-500/10",  border: "border-purple-500/20",  text: "text-purple-400",  label: "Analyzing" };
-  if (["completed","synced","active"].includes(n))
-    return { bg: "bg-emerald-500/10", border: "border-emerald-500/20", text: "text-emerald-400", label: "Synced" };
-  if (["failed","error"].includes(n))
-    return { bg: "bg-red-500/10", border: "border-red-500/20", text: "text-red-400", label: "Failed" };
-  return { bg: "bg-zinc-500/10", border: "border-zinc-500/20", text: "text-zinc-400", label: n };
-}
 
 const PLACEHOLDERS = [
   "A B2B SaaS tool for managing contractor invoices...",
@@ -48,20 +23,68 @@ const PLACEHOLDERS = [
   "A mobile app that turns voice notes into PRDs...",
 ];
 
+function formatClockTime(dateStr: string | Date | undefined): string {
+  if (!dateStr) return "--:--";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "--:--";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+// Groups the audit trail by calendar day so the timeline reads like a log
+// rather than an undifferentiated stack of timestamps.
+function dayBucketLabel(dateStr: string | Date | undefined): string {
+  if (!dateStr) return "Earlier";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "Earlier";
+  const startOf = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diffDays = Math.round((startOf(new Date()) - startOf(date)) / 86_400_000);
+  if (diffDays <= 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7) return date.toLocaleDateString([], { weekday: "long" });
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function formatRelativeTime(dateStr: string | Date | undefined): string {
+  if (!dateStr) return "—";
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "—";
+  const diffMinutes = Math.floor((Date.now() - date.getTime()) / 60_000);
+  const diffHours = Math.floor(diffMinutes / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return "yesterday";
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 export default function PmxOverview() {
-  const navigate   = useNavigate();
-  const { toast }  = useToast();
-  const { inputs, history, decisions, solutions, tasks, understanding, projectId, openTabIds } = usePmxStore();
-  const [idea, setIdea]     = useState("");
+  const navigate = useNavigate();
+  const {
+    inputs,
+    history,
+    decisions,
+    solutions,
+    tasks,
+    understanding,
+    problems,
+    projectId,
+    openTabIds,
+    workspaces,
+  } = usePmxStore();
+
+  const [idea, setIdea] = useState("");
   const [focused, setFocused] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [phIdx, setPhIdx]   = useState(0);
+  const [phIdx, setPhIdx] = useState(0);
   const [typedText, setTypedText] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [ideaPrd, setIdeaPrd] = useState<any>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Typewriter effect: types out each placeholder, pauses, deletes, then moves to the next
+  // Typewriter effect for fresh home idea hero
   useEffect(() => {
     const current = PLACEHOLDERS[phIdx];
     let delay = 45;
@@ -77,20 +100,17 @@ export default function PmxOverview() {
       next = () => setTypedText(current.slice(0, typedText.length - 1));
     } else {
       delay = 300;
-      next = () => { setDeleting(false); setPhIdx(i => (i + 1) % PLACEHOLDERS.length); };
+      next = () => {
+        setDeleting(false);
+        setPhIdx((i) => (i + 1) % PLACEHOLDERS.length);
+      };
     }
 
     const id = setTimeout(next, delay);
     return () => clearTimeout(id);
   }, [typedText, deleting, phIdx]);
 
-  const recentInputs = [...inputs]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 3);
-
-  // Whether there's an idea→PRD document for this workspace. Fetched
-  // unconditionally (not gated behind a "has data" check) since it's one of
-  // the two signals that decide whether this workspace has real data at all.
+  // Fetch idea PRD doc if exists
   useEffect(() => {
     setIdeaPrd(null);
     (async () => {
@@ -99,44 +119,37 @@ export default function PmxOverview() {
         const res = await fetch(`${API_URL}/pmx/idea/prd/latest?projectId=${encodeURIComponent(projectId)}`, { headers });
         const json = await res.json();
         if (json.success) setIdeaPrd(json.data);
-      } catch { /* treated the same as "no idea PRD yet" */ }
+      } catch {
+        /* no idea PRD */
+      }
     })();
   }, [projectId]);
 
-  // Only show the returning-workspace dashboard once there's something real
-  // to show — sources that have actually produced insights, or a generated
-  // idea PRD. A stray audit-log entry (e.g. a leftover "product deleted" log
-  // for an emptied-out workspace) shouldn't be enough to skip the hero.
-  const rawSessionExists = (inputs.length > 0 && decisions.length > 0) || !!ideaPrd;
+  const rawSessionExists = inputs.length > 0 || decisions.length > 0 || !!ideaPrd || solutions.length > 0 || tasks.length > 0;
 
-  // Once a workspace has graduated into the dashboard view, it should stay
-  // there — e.g. clearing out decisions later shouldn't resurrect the idea
-  // hero for a workspace that's clearly already in use. Tracked per
-  // projectId in localStorage rather than a new backend field.
   const [graduated, setGraduated] = useState(false);
   useEffect(() => {
-    try { setGraduated(localStorage.getItem(`pmx_workspace_graduated_${projectId}`) === "1"); }
-    catch { setGraduated(false); }
+    try {
+      setGraduated(localStorage.getItem(`pmx_workspace_graduated_${projectId}`) === "1");
+    } catch {
+      setGraduated(false);
+    }
   }, [projectId]);
+
   useEffect(() => {
     if (rawSessionExists && !graduated) {
-      try { localStorage.setItem(`pmx_workspace_graduated_${projectId}`, "1"); } catch { /* ignore */ }
+      try {
+        localStorage.setItem(`pmx_workspace_graduated_${projectId}`, "1");
+      } catch {
+        /* ignore */
+      }
       setGraduated(true);
     }
   }, [rawSessionExists, graduated, projectId]);
 
-  // "Home" (the topbar button / a fresh startFreshWorkspace() context) is a
-  // projectId that's deliberately never added to openTabIds until it's
-  // promoted into a real workspace — see promoteToTab in pmxStore. Until
-  // that happens this must always be the idea hero, never the returning-
-  // workspace dashboard, no matter what graduated/session data says (which
-  // can otherwise still be true for a moment while the store is still
-  // holding the previous active workspace's data during the projectId swap).
   const isPromotedWorkspace = openTabIds.includes(projectId);
   const sessionExists = isPromotedWorkspace && (rawSessionExists || graduated);
 
-  // Hand the idea straight to /pmx/prd — generation now happens there, in the
-  // PRD workspace's left-pane conversation, instead of blocking here.
   const submit = () => {
     if (!idea.trim() || generating) return;
     setGenerating(true);
@@ -145,36 +158,38 @@ export default function PmxOverview() {
 
   if (sessionExists) {
     return (
-      <DashboardView
+      <WorkspaceOverview
         navigate={navigate}
-        workspaceName={understanding?.productSummary?.name}
+        workspaceName={
+          understanding?.productSummary?.name ||
+          workspaces.find((w) => w.projectId === projectId)?.name ||
+          "Product Workspace"
+        }
         inputs={inputs}
         decisions={decisions}
         solutions={solutions}
         tasks={tasks}
         history={history}
         ideaPrd={ideaPrd}
+        problems={problems}
+        understanding={understanding}
       />
     );
   }
 
   return (
     <div className="flex flex-col min-h-full bg-background">
-
-      {/* ── Ambient top glow ─────────────────────────────────────── */}
+      {/* Ambient top glow */}
       <div
         aria-hidden
         className="pointer-events-none fixed top-0 left-0 right-0 h-64 -z-0"
         style={{
-          background:
-            "radial-gradient(ellipse 90% 100% at 50% 0%, rgba(56,189,248,0.13) 0%, transparent 70%)",
+          background: "radial-gradient(ellipse 90% 100% at 50% 0%, rgba(56,189,248,0.13) 0%, transparent 70%)",
         }}
       />
 
-      {/* ── HERO ─────────────────────────────────────────────────── */}
+      {/* HERO */}
       <section className="relative z-10 flex flex-col items-center justify-center text-center px-6 pt-28 pb-16">
-
-        {/* Badge */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -183,32 +198,30 @@ export default function PmxOverview() {
         >
           <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sky-400 bg-sky-500/8 border border-sky-500/15 px-3 py-1 rounded-full tracking-wide">
             <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
-            AI Product Intelligence Platform
+            Product Intelligence Workspace
           </span>
         </motion.div>
 
-        {/* Headline */}
         <motion.h1
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}
           className="text-4xl sm:text-5xl font-extrabold tracking-tight text-foreground leading-[1.12] mb-4 max-w-2xl"
         >
-          What should you<br className="hidden sm:block" /> build next?
+          What should you
+          <br className="hidden sm:block" /> build next?
         </motion.h1>
 
-        {/* Sub */}
         <motion.p
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
           className="text-sm text-muted-foreground max-w-md leading-relaxed mb-10"
         >
-          Describe your product, feature, startup, or idea. PMX will research,
-          validate, and generate an execution-ready plan.
+          Describe your product, feature, startup, or idea. PMX will research, validate, and generate an execution-ready plan.
         </motion.p>
 
-        {/* ── Prompt input ────────────────────────────────────────── */}
+        {/* Prompt input */}
         <motion.div
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
@@ -217,12 +230,9 @@ export default function PmxOverview() {
         >
           <div
             className={`relative flex items-center rounded-2xl border transition-all duration-200 bg-card/70 backdrop-blur-md shadow-lg ${
-              focused
-                ? "border-sky-500/40 shadow-[0_0_0_3px_rgba(56,189,248,0.08)]"
-                : "border-border/60 hover:border-border"
+              focused ? "border-sky-500/40 shadow-[0_0_0_3px_rgba(56,189,248,0.08)]" : "border-border/60 hover:border-border"
             }`}
           >
-            {/* Typewriter placeholder rendered as overlay when input is empty */}
             {!idea && (
               <span className="pointer-events-none absolute left-5 top-1/2 -translate-y-1/2 flex items-center text-sm text-muted-foreground/45 truncate pr-40 w-full">
                 {typedText}
@@ -234,15 +244,14 @@ export default function PmxOverview() {
               ref={inputRef}
               type="text"
               value={idea}
-              onChange={e => setIdea(e.target.value)}
+              onChange={(e) => setIdea(e.target.value)}
               onFocus={() => setFocused(true)}
               onBlur={() => setFocused(false)}
-              onKeyDown={e => e.key === "Enter" && submit()}
+              onKeyDown={(e) => e.key === "Enter" && submit()}
               disabled={generating}
               className="flex-1 bg-transparent px-5 py-4 text-sm text-foreground focus:outline-none placeholder-transparent disabled:opacity-60"
             />
 
-            {/* CTA */}
             <div className="pr-2 shrink-0">
               <button
                 onClick={submit}
@@ -250,15 +259,17 @@ export default function PmxOverview() {
                 aria-label="Build from idea"
                 className="group inline-flex items-center justify-center h-9 w-9 shrink-0 rounded-xl bg-primary hover:bg-primary/90 disabled:opacity-35 disabled:cursor-not-allowed text-primary-foreground transition-all duration-200 shadow-[0_2px_12px_rgba(56,189,248,0.22)] hover:shadow-[0_4px_20px_rgba(56,189,248,0.35)] hover:-translate-y-px active:translate-y-0"
               >
-                {generating
-                  ? <Loader2 className="h-4 w-4 animate-spin" />
-                  : <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />}
+                {generating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+                )}
               </button>
             </div>
           </div>
         </motion.div>
 
-        {/* ── Secondary actions ────────────────────────────────────── */}
+        {/* Secondary actions */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -269,8 +280,6 @@ export default function PmxOverview() {
             onClick={() => navigate("/pmx/analysis")}
             className="nav-shimmer relative inline-flex items-center gap-1.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-2 text-xs font-semibold text-sky-500 dark:text-sky-300 hover:bg-sky-500/15 hover:border-sky-500/40 transition-all duration-200 shadow-[0_0_16px_rgba(56,189,248,0.25)]"
           >
-            <span className="pointer-events-none absolute inset-0 rounded-xl opacity-60"
-              style={{ background: "radial-gradient(ellipse at 30% 50%, rgba(56,189,248,0.18) 0%, transparent 70%)" }} />
             <TrendingUp className="h-3.5 w-3.5 text-sky-400 drop-shadow-[0_0_6px_rgba(56,189,248,0.9)]" />
             AI Experience Intelligence
           </button>
@@ -282,208 +291,776 @@ export default function PmxOverview() {
           </button>
         </motion.div>
       </section>
-
-      {/* ── BELOW FOLD ───────────────────────────────────────────── */}
-      <div className="relative z-10 max-w-2xl mx-auto w-full px-6 pb-24 space-y-8 mt-4">
-
-        {/* Divider */}
-        <div className="border-t border-border/30" />
-
-        {/* Connect Sources */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.3 }}
-          className="flex items-center justify-between gap-4 py-1"
-        >
-          <div>
-            <p className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Plus className="h-3.5 w-3.5 text-sky-400" /> Connect Your Sources
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              PMX becomes smarter when connected to your product ecosystem.
-            </p>
-          </div>
-          <button
-            onClick={() => navigate("/pmx/sources")}
-            className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-primary hover:bg-primary/90 px-4 py-2 text-xs font-semibold text-primary-foreground transition-all duration-200 shadow-sm"
-          >
-            <Plus className="h-3.5 w-3.5" /> Connect Sources
-          </button>
-        </motion.div>
-
-        {/* Recent Sources */}
-        <motion.div
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.35 }}
-          className="space-y-4"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-foreground">Recent Sources</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Resume analysing your previously connected sources.</p>
-            </div>
-            <Link
-              to="/pmx/sources"
-              className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1 font-semibold"
-            >
-              See All <ChevronRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-
-          {recentInputs.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {recentInputs.map(input => {
-                const meta   = getConnectorMeta(input.type);
-                const Icon   = meta.icon;
-                const status = getStatusStyle(input.status);
-                return (
-                  <div
-                    key={input._id}
-                    onClick={() => navigate("/pmx/sources")}
-                    className="rounded-xl border border-border/50 bg-card/40 hover:border-border hover:bg-card/70 backdrop-blur-sm p-3.5 cursor-pointer transition-all duration-200 flex flex-col justify-between h-28 group"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className={`flex h-7 w-7 items-center justify-center rounded-lg ${meta.bg} border ${meta.border} shrink-0`}>
-                          <Icon className={`h-3.5 w-3.5 ${meta.color}`} />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">{input.name}</p>
-                          <p className="text-[10px] text-muted-foreground">{meta.label}</p>
-                        </div>
-                      </div>
-                      <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border shrink-0 ${status.bg} ${status.border} ${status.text}`}>
-                        {status.label}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-border/30 pt-2">
-                      <span className="text-[9px] text-muted-foreground">Last synced</span>
-                      <span className="text-[9px] text-foreground font-medium">
-                        {new Date(input.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-center text-xs text-muted-foreground py-8">
-              No recently connected sources. Add a source above to get started.
-            </p>
-          )}
-        </motion.div>
-
-      </div>
     </div>
   );
 }
 
-// ── Dashboard: shown once a workspace has actually been worked on ──────────
-function DashboardView({ navigate, workspaceName, inputs, decisions, solutions, tasks, history, ideaPrd }: {
+/* ══════════════════════════════════════════════════════════════════════
+   AUDIT TRAIL VOCABULARY
+
+   The backend writes structured audit rows (`action` + `entityType`, see
+   backend/src/workspaces/pmx/routes/pmx.ts logAudit calls). Mapping off
+   those fields — rather than pattern-matching the free-text `details` —
+   keeps the activity timeline accurate as copy changes server-side.
+   ══════════════════════════════════════════════════════════════════════ */
+
+const ENTITY_AREA: Record<string, string> = {
+  PmxInput: "Sources",
+  PmxUnderstanding: "Workspace",
+  PmxProject: "Workspace",
+  PmxEvidence: "Insights",
+  PmxProblem: "Insights",
+  PmxOpportunity: "Insights",
+  PmxDecision: "Insights",
+  PmxSolution: "PRD",
+  PmxIdeaPrd: "PRD",
+  PmxExecutionTask: "Execution",
+  PmxArtifact: "Artifacts",
+  PmxScreenshotProject: "UI Analysis",
+  PmxSession: "Pipeline",
+};
+
+const ACTION_COPY: Record<string, { title: string; context: string }> = {
+  input_created: { title: "Source connected", context: "Ingestion" },
+  input_updated: { title: "Source updated", context: "Ingestion" },
+  input_reprocessed: { title: "Source reprocessed", context: "Ingestion" },
+  input_deleted: { title: "Source removed", context: "Ingestion" },
+  understanding_updated: { title: "Product understanding updated", context: "Context model" },
+  project_renamed: { title: "Workspace renamed", context: "Settings" },
+  project_deleted: { title: "Workspace deleted", context: "Settings" },
+  evidence_created: { title: "Evidence recorded", context: "Signals" },
+  evidence_deleted: { title: "Evidence removed", context: "Signals" },
+  problem_created: { title: "Problem logged", context: "Diagnosis" },
+  problem_deleted: { title: "Problem removed", context: "Diagnosis" },
+  opportunity_created: { title: "Opportunity logged", context: "Prioritisation" },
+  opportunity_updated: { title: "Opportunity reprioritised", context: "Prioritisation" },
+  opportunity_deleted: { title: "Opportunity removed", context: "Prioritisation" },
+  decision_status_changed: { title: "Insight decision recorded", context: "Review" },
+  decision_deleted: { title: "Insight removed", context: "Review" },
+  solution_created: { title: "PRD created", context: "Specification" },
+  solution_updated: { title: "PRD updated", context: "Specification" },
+  solution_refined: { title: "PRD refined", context: "Refinement" },
+  solution_rewound: { title: "PRD rolled back", context: "Version history" },
+  solutions_combined: { title: "PRDs merged", context: "Specification" },
+  idea_prd_generated: { title: "PRD generated", context: "Specification" },
+  idea_prd_refined: { title: "PRD refined", context: "Refinement" },
+  idea_prd_rewound: { title: "PRD rolled back", context: "Version history" },
+  task_created: { title: "Execution item created", context: "Backlog" },
+  task_updated: { title: "Execution item updated", context: "Backlog" },
+  task_status_changed: { title: "Execution status changed", context: "Board" },
+  task_deleted: { title: "Execution item removed", context: "Backlog" },
+  tasks_generated: { title: "Execution plan compiled", context: "Backlog" },
+  artifact_created: { title: "Artifact exported", context: "Documents" },
+  screenshot_audit_started: { title: "UI audit started", context: "Experience intelligence" },
+  screenshot_audit_deleted: { title: "UI audit removed", context: "Experience intelligence" },
+  ai_experience_intelligence_run: { title: "Experience intelligence run", context: "Analysis" },
+  pipeline_run: { title: "Intelligence pipeline completed", context: "Analysis" },
+};
+
+// Most audit details carry their subject in double quotes —
+// `Refined PRD (v2): "Improve mobile touch targets"`. Surfacing just that
+// fragment keeps the timeline readable without repeating the action verb.
+function extractSubject(details: string | undefined): string | null {
+  if (!details) return null;
+  const quoted = details.match(/"([^"]{2,120})"/);
+  return quoted ? quoted[1] : null;
+}
+
+function titleForLog(log: { action?: string; details?: string }): string {
+  const base = ACTION_COPY[log.action || ""]?.title;
+  if (!base) {
+    // Unknown/new server-side action — humanise the slug rather than
+    // dropping the row from the trail entirely.
+    return (log.action || "Workspace activity").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  }
+  const version = log.details?.match(/\bto v(\d+)/i);
+  if (version && base.includes("rolled back")) return `${base} to v${version[1]}`;
+  return base;
+}
+
+type PulseLevel = "high" | "medium" | "ready" | "info" | "clear";
+
+const PULSE_TONE: Record<PulseLevel, { dot: string; label: string; text: string }> = {
+  high: { dot: "bg-rose-400", label: "High", text: "text-rose-400" },
+  medium: { dot: "bg-amber-400", label: "Medium", text: "text-amber-400" },
+  ready: { dot: "bg-sky-400", label: "Ready", text: "text-sky-400" },
+  info: { dot: "bg-muted-foreground/50", label: "Note", text: "text-muted-foreground" },
+  clear: { dot: "bg-emerald-400", label: "Clear", text: "text-emerald-400" },
+};
+
+interface PulseSignal {
+  id: string;
+  level: PulseLevel;
+  title: string;
+  detail: string;
+  timestamp?: string;
+  actionLabel?: string;
+  actionHref?: string;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   WORKSPACE OVERVIEW
+   ══════════════════════════════════════════════════════════════════════ */
+
+function WorkspaceOverview({
+  navigate,
+  workspaceName,
+  inputs,
+  decisions,
+  solutions,
+  tasks,
+  history,
+  ideaPrd,
+  problems,
+  understanding,
+}: {
   navigate: (path: string) => void;
-  workspaceName?: string;
+  workspaceName: string;
   inputs: any[];
   decisions: any[];
   solutions: any[];
   tasks: any[];
   history: any[];
   ideaPrd: any;
+  problems: any[];
+  understanding: PmxUnderstanding | null;
 }) {
-  const pendingInsights = decisions.filter(d => d.status === "pending").length;
-  const openTasks = tasks.filter(t => t.status !== "done").length;
-  const prdVersion = ideaPrd?.version ?? solutions[0]?.version ?? null;
-  const recentActivity = [...history]
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    .slice(0, 5);
+  const pendingInsights = decisions.filter((d) => d.status === "pending").length;
+  const approvedInsights = decisions.filter((d) => d.status === "approved" || d.status === "implemented").length;
+  const openTasks = tasks.filter((t) => t.status !== "done").length;
+  const doneTasks = tasks.length - openTasks;
+  const failedSources = inputs.filter((i) => i.status === "failed").length;
+  const processingSources = inputs.filter((i) => i.status === "pending" || i.status === "processing").length;
+  const prdVersion = ideaPrd?.version ?? solutions[0]?.version ?? 1;
+  const hasPrd = !!ideaPrd || solutions.length > 0;
 
-  const stats = [
-    { label: "Sources Connected", value: inputs.length,                          icon: Database },
-    { label: "Pending Insights",  value: pendingInsights,                        icon: Sparkles },
-    { label: "PRD Version",       value: prdVersion ? `v${prdVersion}` : "—",     icon: FileText },
-    { label: "Open Tasks",        value: openTasks,                              icon: Award },
-  ];
+  const lastAnalyzedDate = useMemo(() => {
+    const stamps = [
+      ...history.map((h) => new Date(h.createdAt).getTime()),
+      ...inputs.map((i) => new Date(i.updatedAt || i.createdAt).getTime()),
+      ...solutions.map((s: any) => new Date(s.updatedAt || s.createdAt).getTime()),
+    ].filter((t) => !isNaN(t));
+    return stamps.length ? new Date(Math.max(...stamps)) : null;
+  }, [history, inputs, solutions]);
+
+  /* ── Product pulse: real signals, ordered by what actually blocks work ── */
+  const pulse = useMemo<PulseSignal[]>(() => {
+    const signals: PulseSignal[] = [];
+
+    // Sources that failed to ingest silently poison every downstream
+    // inference, so they outrank everything else on the page.
+    if (failedSources > 0) {
+      const failed = inputs.find((i) => i.status === "failed");
+      signals.push({
+        id: "source-failed",
+        level: "high",
+        title: `${failedSources} source${failedSources === 1 ? "" : "s"} failed to process`,
+        detail: "PMX could not read this input, so it is excluded from the current product understanding.",
+        timestamp: formatRelativeTime(failed?.updatedAt || failed?.createdAt),
+        actionLabel: "Fix source",
+        actionHref: "/pmx/sources",
+      });
+    }
+
+    // Unresolved critical/high problems — the substance of the diagnosis.
+    problems
+      .filter((p) => p.severity === "critical" || p.severity === "high")
+      .slice(0, 2)
+      .forEach((p, i) => {
+        signals.push({
+          id: `problem-${p._id || i}`,
+          level: p.severity === "critical" ? "high" : "medium",
+          title: p.title,
+          detail:
+            p.userImpact ||
+            p.businessImpact ||
+            p.description ||
+            "Identified during analysis and still open.",
+          timestamp: formatRelativeTime(p.createdAt),
+          actionLabel: "Review insight",
+          actionHref: "/pmx/insights",
+        });
+      });
+
+    if (pendingInsights > 0) {
+      const topPending = decisions.find((d) => d.status === "pending");
+      signals.push({
+        id: "insights-pending",
+        level: "medium",
+        title: `${pendingInsights} insight${pendingInsights === 1 ? "" : "s"} awaiting your decision`,
+        detail: topPending?.title
+          ? `Oldest: ${topPending.title}`
+          : "Recommendations are queued for approval before they can become specifications.",
+        timestamp: formatRelativeTime(topPending?.createdAt),
+        actionLabel: "Review insights",
+        actionHref: "/pmx/insights",
+      });
+    }
+
+    // Recent PRD version movement, read from the structured audit trail.
+    const prdEvent = history.find(
+      (h) => h.action === "solution_rewound" || h.action === "idea_prd_rewound"
+    );
+    if (prdEvent) {
+      signals.push({
+        id: "prd-rollback",
+        level: "medium",
+        title: titleForLog(prdEvent),
+        detail: `The specification history moved backwards — v${prdVersion} is the version engineering is reading today.`,
+        timestamp: formatRelativeTime(prdEvent.createdAt),
+        actionLabel: "Open PRD",
+        actionHref: "/pmx/prd",
+      });
+    }
+
+    if (approvedInsights > 0 && !hasPrd) {
+      signals.push({
+        id: "approved-no-prd",
+        level: "ready",
+        title: `${approvedInsights} approved insight${approvedInsights === 1 ? "" : "s"} without a specification`,
+        detail: "Approved decisions are ready to be written up as a PRD before they reach engineering.",
+        actionLabel: "Create PRD",
+        actionHref: "/pmx/prd",
+      });
+    }
+
+    if (hasPrd && tasks.length === 0) {
+      signals.push({
+        id: "prd-no-tasks",
+        level: "ready",
+        title: "PRD has no execution plan yet",
+        detail: `v${prdVersion} is specified but has not been broken down into work items.`,
+        actionLabel: "Plan execution",
+        actionHref: "/pmx/execution",
+      });
+    } else if (openTasks > 0) {
+      signals.push({
+        id: "tasks-open",
+        level: "ready",
+        title: `${openTasks} execution item${openTasks === 1 ? "" : "s"} open`,
+        detail:
+          doneTasks > 0
+            ? `${doneTasks} of ${tasks.length} complete across the current board.`
+            : "Work is specified and waiting to be picked up on the execution board.",
+        timestamp: formatRelativeTime(tasks[0]?.updatedAt || tasks[0]?.createdAt),
+        actionLabel: "View board",
+        actionHref: "/pmx/execution",
+      });
+    }
+
+    if (processingSources > 0) {
+      signals.push({
+        id: "sources-processing",
+        level: "info",
+        title: `${processingSources} source${processingSources === 1 ? "" : "s"} still processing`,
+        detail: "Insights on this page will change once ingestion finishes.",
+        actionLabel: "View sources",
+        actionHref: "/pmx/sources",
+      });
+    }
+
+    if (inputs.length === 1 && failedSources === 0) {
+      signals.push({
+        id: "single-source",
+        level: "info",
+        title: "Everything PMX knows comes from one source",
+        detail: "A second input — repository, analytics export, or customer notes — materially raises confidence.",
+        actionLabel: "Add source",
+        actionHref: "/pmx/sources",
+      });
+    }
+
+    if (signals.length === 0) {
+      signals.push({
+        id: "clear",
+        level: "clear",
+        title: "Nothing needs your attention",
+        detail: "No open problems, pending decisions, or unassigned work in this workspace.",
+        timestamp: lastAnalyzedDate ? formatRelativeTime(lastAnalyzedDate) : undefined,
+      });
+    }
+
+    return signals.slice(0, 5);
+  }, [
+    inputs,
+    failedSources,
+    processingSources,
+    problems,
+    decisions,
+    pendingInsights,
+    approvedInsights,
+    history,
+    prdVersion,
+    hasPrd,
+    tasks,
+    openTasks,
+    doneTasks,
+    lastAnalyzedDate,
+  ]);
+
+  const attentionCount = pulse.filter((s) => s.level === "high" || s.level === "medium").length;
+
+  /* ── Activity trail, grouped by day ── */
+  const activityDays = useMemo(() => {
+    const rows = [...history]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 12)
+      .map((log) => ({
+        id: log._id,
+        time: formatClockTime(log.createdAt),
+        day: dayBucketLabel(log.createdAt),
+        title: titleForLog(log),
+        subject: extractSubject(log.details),
+        area: ENTITY_AREA[log.entityType] || "Workspace",
+        context: ACTION_COPY[log.action || ""]?.context || "Activity",
+        raw: log.details as string | undefined,
+      }));
+
+    const groups: Array<{ day: string; rows: typeof rows }> = [];
+    rows.forEach((row) => {
+      const last = groups[groups.length - 1];
+      if (last && last.day === row.day) last.rows.push(row);
+      else groups.push({ day: row.day, rows: [row] });
+    });
+    return groups;
+  }, [history]);
+
+  const isLowData = inputs.length === 0 && decisions.length === 0 && tasks.length === 0 && !hasPrd;
 
   return (
-    <div className="relative flex flex-col min-h-full bg-background">
+    <div className="relative flex flex-col min-h-full bg-background selection:bg-sky-500/20">
       <div
         aria-hidden
-        className="pointer-events-none fixed top-0 left-0 right-0 h-64 -z-0"
-        style={{ background: "radial-gradient(ellipse 90% 100% at 50% 0%, rgba(56,189,248,0.10) 0%, transparent 70%)" }}
+        className="pointer-events-none absolute top-0 left-0 right-0 h-72"
+        style={{
+          background: "radial-gradient(ellipse 80% 100% at 50% 0%, rgba(56,189,248,0.05) 0%, transparent 70%)",
+        }}
       />
 
-      <div className="relative z-10 max-w-4xl mx-auto w-full px-6 pt-12 pb-24 space-y-8">
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-10 w-full max-w-[1160px] mx-auto px-5 sm:px-8 pt-9 pb-24"
+      >
+        {/* ── WORKSPACE HEADER ───────────────────────────────────────── */}
+        <header className="pb-5 border-b border-border/50">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[10.5px] font-semibold uppercase tracking-[0.13em] text-sky-400/90 mb-2">
+                Product Intelligence Workspace
+              </p>
+              <h1 className="text-[26px] sm:text-[32px] font-bold tracking-[-0.022em] text-foreground leading-[1.15] truncate">
+                {workspaceName}
+              </h1>
+              <p className="text-[13px] text-muted-foreground mt-2.5 leading-relaxed max-w-xl">
+                {understanding?.productSummary?.oneLiner
+                  ? understanding.productSummary.oneLiner
+                  : "PMX is tracking your product context, decisions, insights, and execution."}
+              </p>
+            </div>
 
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sky-400 bg-sky-500/8 border border-sky-500/15 px-3 py-1 rounded-full tracking-wide mb-3">
-            <span className="h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
-            Workspace Overview
-          </span>
-          <h1 className="text-2xl font-extrabold tracking-tight text-foreground">{workspaceName || "Welcome back"}</h1>
-          <p className="text-sm text-muted-foreground mt-1.5">Here's where this product stands in the pipeline.</p>
-        </motion.div>
+            <div className="flex items-center gap-2 shrink-0 sm:mt-[26px]">
+              <button
+                onClick={() => navigate("/pmx/analysis")}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-sky-500/25 bg-sky-500/[0.07] hover:bg-sky-500/[0.13] hover:border-sky-500/40 text-[12px] font-semibold text-sky-400 transition-colors"
+              >
+                <TrendingUp className="h-3.5 w-3.5" />
+                Run UX audit
+              </button>
+              <button
+                onClick={() => navigate("/pmx/sources")}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-border/60 hover:border-border hover:bg-muted/50 text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Add source
+              </button>
+            </div>
+          </div>
 
-        {/* Stat tiles */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.1 }}
-          className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map(stat => (
-            <div key={stat.label} className="glass-card p-4 text-center">
-              <stat.icon className="w-4 h-4 text-primary mx-auto mb-2" />
-              <p className="text-xl font-display font-bold gradient-text">{stat.value}</p>
-              <p className="text-[11px] text-muted-foreground mt-1">{stat.label}</p>
+          {/* Compact metadata strip */}
+          <dl className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-5 text-[12px]">
+            {[
+              { label: "Last analyzed", value: lastAnalyzedDate ? formatRelativeTime(lastAnalyzedDate) : "never" },
+              { label: "Sources", value: `${inputs.length} connected` },
+              { label: "PRD", value: hasPrd ? `v${prdVersion}` : "none", mono: true },
+              { label: "Open insights", value: `${pendingInsights}`, mono: true },
+              { label: "Open execution", value: `${openTasks}`, mono: true },
+            ].map((meta, i) => (
+              <div key={meta.label} className="flex items-center gap-4">
+                {i > 0 && <span aria-hidden className="hidden sm:block h-3 w-px bg-border/70" />}
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-muted-foreground/70">{meta.label}</dt>
+                  <dd className={`text-foreground/90 font-medium ${meta.mono ? "tabular-nums" : ""}`}>{meta.value}</dd>
+                </div>
+              </div>
+            ))}
+          </dl>
+        </header>
+
+        {isLowData ? (
+          <LowDataState navigate={navigate} />
+        ) : (
+          <>
+            {/* ── WHAT'S HAPPENING + WORKSPACE STATE ─────────────────── */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-x-10 gap-y-10 pt-8 items-start">
+              {/* Product pulse */}
+              <section className="lg:col-span-8 min-w-0">
+                <SectionHeader
+                  label="Product pulse"
+                  trailing={
+                    <span className={attentionCount > 0 ? "text-foreground/80" : "text-muted-foreground"}>
+                      {attentionCount > 0
+                        ? `${attentionCount} thing${attentionCount === 1 ? "" : "s"} need${attentionCount === 1 ? "s" : ""} your attention`
+                        : "Up to date"}
+                    </span>
+                  }
+                />
+
+                <div className="divide-y divide-border/40 border-y border-border/40">
+                  {pulse.map((signal) => {
+                    const tone = PULSE_TONE[signal.level];
+                    return (
+                      <article key={signal.id} className="group py-3.5 flex gap-3.5">
+                        <span className="mt-[7px] shrink-0">
+                          <span className={`block h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                        </span>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-baseline gap-2.5 flex-wrap">
+                            <span className={`text-[10px] font-semibold uppercase tracking-[0.1em] ${tone.text}`}>
+                              {tone.label}
+                            </span>
+                            <h3 className="text-[13.5px] font-semibold text-foreground leading-snug">
+                              {signal.title}
+                            </h3>
+                          </div>
+                          <p className="text-[12.5px] text-muted-foreground leading-relaxed mt-1 max-w-2xl">
+                            {signal.detail}
+                          </p>
+                          {signal.actionHref && (
+                            <button
+                              onClick={() => navigate(signal.actionHref!)}
+                              className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-muted-foreground hover:text-sky-400 transition-colors"
+                            >
+                              {signal.actionLabel}
+                              <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {signal.timestamp && (
+                          <span className="shrink-0 text-[11px] text-muted-foreground/60 tabular-nums pt-0.5">
+                            {signal.timestamp}
+                          </span>
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* ── SECONDARY RAIL ───────────────────────────────────── */}
+              <aside className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-x-8 gap-y-8 min-w-0">
+              {/* Product state */}
+              <section>
+                <SectionHeader label="Product state" />
+                <div className="border-y border-border/40 divide-y divide-border/30">
+                  <StateRow
+                    label="Sources"
+                    value={inputs.length === 0 ? "none" : `${inputs.length} connected`}
+                    hint={failedSources > 0 ? `${failedSources} failed` : processingSources > 0 ? `${processingSources} processing` : undefined}
+                    hintTone={failedSources > 0 ? "text-rose-400" : "text-muted-foreground"}
+                    onClick={() => navigate("/pmx/sources")}
+                  />
+                  <StateRow
+                    label="Insights"
+                    value={
+                      decisions.length === 0
+                        ? "none"
+                        : `${pendingInsights} pending · ${approvedInsights} approved`
+                    }
+                    onClick={() => navigate("/pmx/insights")}
+                  />
+                  <StateRow
+                    label="PRD"
+                    value={hasPrd ? `v${prdVersion} current` : "not created"}
+                    onClick={() => navigate("/pmx/prd")}
+                  />
+                  <StateRow
+                    label="Execution"
+                    value={tasks.length === 0 ? "none" : `${openTasks} open`}
+                    hint={doneTasks > 0 ? `${doneTasks} done` : undefined}
+                    onClick={() => navigate("/pmx/execution")}
+                  />
+                </div>
+              </section>
+
+              {/* PMX understanding */}
+              <section>
+                <SectionHeader label="PMX understanding" />
+                <div className="border-y border-border/40 py-3.5 space-y-3">
+                  {understanding?.productSummary ? (
+                    <dl className="space-y-1.5">
+                      {understanding.productSummary.category && (
+                        <UnderstandingRow label="Category" value={sentenceCase(understanding.productSummary.category)} />
+                      )}
+                      {understanding.productSummary.stage && (
+                        <UnderstandingRow label="Stage" value={sentenceCase(understanding.productSummary.stage)} />
+                      )}
+                      {(understanding.coreFeatures?.length ?? 0) > 0 && (
+                        <UnderstandingRow label="Features" value={`${understanding.coreFeatures.length} mapped`} />
+                      )}
+                      {(understanding.personas?.length ?? 0) > 0 && (
+                        <UnderstandingRow label="Personas" value={`${understanding.personas.length} defined`} />
+                      )}
+                    </dl>
+                  ) : (
+                    <p className="text-[12.5px] text-muted-foreground leading-relaxed">
+                      PMX has not built a product model yet. Processing a source will produce one.
+                    </p>
+                  )}
+
+                  <p className="text-[12px] text-muted-foreground/85 leading-relaxed pt-3 border-t border-border/30">
+                    Built from{" "}
+                    <span className="text-foreground/85">
+                      {inputs.length} source{inputs.length === 1 ? "" : "s"}
+                    </span>
+                    ,{" "}
+                    <span className="text-foreground/85">
+                      {decisions.length} insight{decisions.length === 1 ? "" : "s"}
+                    </span>
+                    ,{" "}
+                    <span className="text-foreground/85">{hasPrd ? `1 PRD (v${prdVersion})` : "no PRD"}</span>, and{" "}
+                    <span className="text-foreground/85">
+                      {tasks.length} execution item{tasks.length === 1 ? "" : "s"}
+                    </span>
+                    .
+                  </p>
+
+                  {inputs.length < 3 && (
+                    <p className="text-[11.5px] text-muted-foreground/60 leading-relaxed">
+                      Each additional source raises the confidence behind every insight.
+                    </p>
+                  )}
+                </div>
+              </section>
+
+              {/* Continue working */}
+              <section className="sm:col-span-2 lg:col-span-1">
+                <SectionHeader label="Continue working" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-x-8">
+                  <ContinueLink label="Open PRD" onClick={() => navigate("/pmx/prd")} />
+                  <ContinueLink label="Review insights" onClick={() => navigate("/pmx/insights")} />
+                  <ContinueLink label="View execution" onClick={() => navigate("/pmx/execution")} />
+                  <ContinueLink label="Add source" onClick={() => navigate("/pmx/sources")} />
+                </div>
+              </section>
+              </aside>
+            </div>
+
+            {/* ── ACTIVITY TRAIL (full width) ────────────────────────── */}
+            <section className="pt-10">
+              <SectionHeader
+                label="Activity"
+                trailing={
+                  <Link
+                    to="/pmx/history"
+                    className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Full audit trail
+                    <ChevronRight className="h-3 w-3" />
+                  </Link>
+                }
+              />
+
+              {activityDays.length > 0 ? (
+                <div className="space-y-5">
+                  {activityDays.map((group) => (
+                    <div key={group.day}>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/60 pb-2 mb-1 border-b border-border/30">
+                        {group.day}
+                      </p>
+                      <ol>
+                        {group.rows.map((row) => (
+                          <li
+                            key={row.id}
+                            title={row.raw}
+                            className="group flex gap-3 sm:gap-4 py-2 border-b border-border/20 last:border-0 hover:bg-muted/20 -mx-2 px-2 rounded transition-colors"
+                          >
+                            <time className="shrink-0 w-[38px] pt-px text-[11px] tabular-nums text-muted-foreground/60 group-hover:text-muted-foreground transition-colors">
+                              {row.time}
+                            </time>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[13px] text-foreground/90 leading-snug">{row.title}</p>
+                              {row.subject ? (
+                                <p className="text-[12px] text-muted-foreground/80 leading-snug mt-0.5 truncate">
+                                  “{row.subject}”
+                                </p>
+                              ) : (
+                                <p className="text-[11.5px] text-muted-foreground/55 leading-snug mt-0.5 sm:hidden">
+                                  {row.area} · {row.context}
+                                </p>
+                              )}
+                            </div>
+                            <span className="hidden sm:block shrink-0 w-[190px] text-right text-[11.5px] text-muted-foreground/45 pt-px">
+                              {row.area} · {row.context}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[12.5px] text-muted-foreground py-4 border-y border-border/40">
+                  No activity recorded in this workspace yet.
+                </p>
+              )}
+            </section>
+          </>
+        )}
+      </motion.div>
+    </div>
+  );
+}
+
+/* ── Small page-local primitives ─────────────────────────────────────── */
+
+function SectionHeader({ label, trailing }: { label: string; trailing?: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 mb-3">
+      <h2 className="text-[10.5px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">{label}</h2>
+      {trailing && <div className="text-[11.5px] shrink-0">{trailing}</div>}
+    </div>
+  );
+}
+
+function StateRow({
+  label,
+  value,
+  hint,
+  hintTone = "text-muted-foreground",
+  onClick,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  hintTone?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="group w-full flex items-baseline justify-between gap-3 py-2.5 text-left hover:bg-muted/20 -mx-2 px-2 rounded transition-colors"
+    >
+      <span className="text-[12.5px] text-muted-foreground shrink-0">{label}</span>
+      <span className="flex items-baseline gap-2 min-w-0">
+        <span className="text-[12.5px] font-medium text-foreground/90 truncate tabular-nums">{value}</span>
+        {hint && <span className={`text-[11px] shrink-0 ${hintTone}`}>· {hint}</span>}
+        <ChevronRight className="h-3 w-3 shrink-0 self-center text-muted-foreground/25 group-hover:text-muted-foreground/70 transition-colors" />
+      </span>
+    </button>
+  );
+}
+
+function UnderstandingRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <dt className="text-[12.5px] text-muted-foreground shrink-0">{label}</dt>
+      <dd className="text-[12.5px] text-foreground/90 font-medium truncate text-right">{value}</dd>
+    </div>
+  );
+}
+
+// Model-authored fields (category, stage) arrive in inconsistent casing.
+function sentenceCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function ContinueLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="group w-full flex items-center justify-between gap-3 py-2 text-left border-b border-border/25 hover:border-border/60 transition-colors"
+    >
+      <span className="text-[12.5px] text-foreground/80 group-hover:text-foreground transition-colors">{label}</span>
+      <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground/35 group-hover:text-sky-400 transition-colors" />
+    </button>
+  );
+}
+
+/* ── Low-data state: potential, not emptiness ────────────────────────── */
+
+const SOURCE_YIELD = [
+  {
+    source: "Product URL",
+    learns: "Navigation, accessibility, responsiveness, and conversion friction on live screens.",
+  },
+  {
+    source: "Repository",
+    learns: "Architecture, technical debt, and the delivery constraints behind each decision.",
+  },
+  {
+    source: "Customer notes",
+    learns: "Pain points, recurring requests, and the language your users actually use.",
+  },
+  {
+    source: "Analytics export",
+    learns: "Where activation stalls, where users drop off, and which features carry retention.",
+  },
+];
+
+function LowDataState({ navigate }: { navigate: (path: string) => void }) {
+  return (
+    <div className="pt-9 grid grid-cols-1 lg:grid-cols-12 gap-x-10 gap-y-9 items-start">
+      <div className="lg:col-span-7">
+        <SectionHeader label="Product intelligence" />
+        <h2 className="text-[19px] sm:text-[21px] font-semibold tracking-[-0.015em] text-foreground leading-snug">
+          Your workspace is connected.
+          <br />
+          PMX is ready to build its understanding of your product.
+        </h2>
+        <p className="text-[13px] text-muted-foreground leading-relaxed mt-3 max-w-lg">
+          Nothing has been ingested yet, so there is nothing to report. Connect one input and PMX will start producing
+          evidence, problems, prioritised decisions, and an execution plan from it.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2 mt-6">
+          <button
+            onClick={() => navigate("/pmx/sources")}
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-[12.5px] font-semibold transition-colors"
+          >
+            <Database className="h-3.5 w-3.5" />
+            Add a source
+          </button>
+          <button
+            onClick={() => navigate("/pmx/prd")}
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-border/60 hover:border-border hover:bg-muted/50 text-[12.5px] font-medium text-foreground/85 transition-colors"
+          >
+            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+            Create PRD
+          </button>
+          <button
+            onClick={() => navigate("/pmx/analysis")}
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border border-sky-500/25 bg-sky-500/[0.07] hover:bg-sky-500/[0.13] hover:border-sky-500/40 text-[12.5px] font-semibold text-sky-400 transition-colors"
+          >
+            <TrendingUp className="h-3.5 w-3.5" />
+            Run AI Experience Intelligence
+          </button>
+        </div>
+      </div>
+
+      <div className="lg:col-span-5">
+        <SectionHeader label="What PMX learns from each source" />
+        <dl className="border-y border-border/40 divide-y divide-border/30">
+          {SOURCE_YIELD.map((item) => (
+            <div key={item.source} className="py-3">
+              <dt className="text-[12.5px] font-medium text-foreground/90">{item.source}</dt>
+              <dd className="text-[12px] text-muted-foreground leading-relaxed mt-0.5">{item.learns}</dd>
             </div>
           ))}
-        </motion.div>
-
-        {/* Quick actions */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.15 }}
-          className="flex flex-wrap items-center gap-2.5">
-          <button onClick={() => navigate("/pmx/sources")}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border/50 bg-transparent hover:bg-muted/50 hover:border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-all duration-200">
-            <Plus className="h-3.5 w-3.5" /> Add Sources
-          </button>
-          <button onClick={() => navigate("/pmx/insights")}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border/50 bg-transparent hover:bg-muted/50 hover:border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-all duration-200">
-            <Sparkles className="h-3.5 w-3.5" /> Review Insights
-          </button>
-          <button onClick={() => navigate("/pmx/prd")}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border/50 bg-transparent hover:bg-muted/50 hover:border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-all duration-200">
-            <BookOpen className="h-3.5 w-3.5" /> Open PRD
-          </button>
-          <button onClick={() => navigate("/pmx/execution")}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-border/50 bg-transparent hover:bg-muted/50 hover:border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-all duration-200">
-            <Award className="h-3.5 w-3.5" /> View Execution Board
-          </button>
-        </motion.div>
-
-        {/* Recent activity */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.2 }}
-          className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-foreground">Recent Activity</p>
-            <Link to="/pmx/history" className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1 font-semibold">
-              See All <ChevronRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-          {recentActivity.length > 0 ? (
-            <div className="space-y-2">
-              {recentActivity.map((log: any) => (
-                <div key={log._id} className="flex items-start gap-3 rounded-xl border border-border/40 bg-card/30 px-4 py-3">
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs text-foreground/80 leading-relaxed">{log.details}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{new Date(log.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-center text-xs text-muted-foreground py-8">No activity logged yet.</p>
-          )}
-        </motion.div>
-
+        </dl>
       </div>
     </div>
   );

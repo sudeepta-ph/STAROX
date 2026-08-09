@@ -36,7 +36,9 @@ export interface PmxInput {
   content?: string;
   summary?: string;
   status: string;
+  isArchived?: boolean;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface PmxUnderstanding {
@@ -55,6 +57,10 @@ export interface PmxUnderstanding {
   valueProposition: string;
   customerJourney: Array<{ stage: string; actions: string[]; painPoints: string[] }>;
   version: number;
+  workspaceName?: string;
+  workspaceDescription?: string;
+  inviteLinksEnabled?: boolean;
+  aiSettings?: { autoAnalysis: boolean };
 }
 
 export interface PmxEvidence {
@@ -162,6 +168,8 @@ export interface PmxAuditLog {
   createdAt: string;
 }
 
+export type PmxWorkspaceRole = "owner" | "admin" | "member";
+
 export interface PmxWorkspaceSummary {
   projectId: string;
   name: string;
@@ -169,6 +177,18 @@ export interface PmxWorkspaceSummary {
   isProject: boolean;
   primarySource: { _id: string; name: string; url?: string; type: string } | null;
   updatedAt: string;
+  role: PmxWorkspaceRole;
+}
+
+export interface PmxWorkspaceMember {
+  _id: string;
+  userId: string;
+  role: PmxWorkspaceRole;
+  joinedAt: string;
+  invitedBy?: string;
+  name: string;
+  email: string;
+  avatar: string;
 }
 
 const ACTIVE_PROJECT_KEY = "pmx_active_project_id";
@@ -230,6 +250,45 @@ interface PmxStore {
 
   workspaces: PmxWorkspaceSummary[];
   workspacesLoading: boolean;
+  // The active workspace's role for the signed-in user — derived from
+  // `workspaces` each time it's refetched (see fetchWorkspaces), mirroring
+  // how `understanding` tracks `projectId`. Null until workspaces load, or
+  // if the active projectId isn't a real/joined workspace yet.
+  role: PmxWorkspaceRole | null;
+
+  members: PmxWorkspaceMember[];
+  membersLoading: boolean;
+  fetchMembers: () => Promise<void>;
+  changeMemberRole: (memberId: string, role: "admin" | "member") => Promise<boolean>;
+  removeMember: (memberId: string) => Promise<boolean>;
+
+  // Legacy link-based invite accept — kept only so an already-distributed
+  // /pmx/join/<uuid> link still works (see PmxJoin.tsx). Nothing generates
+  // new links anymore; use the invite-code actions below for that.
+  acceptInvite: (token: string) => Promise<{ projectId: string; workspaceName: string } | null>;
+
+  // Current invite-code mechanism. `code` is only ever populated right
+  // after generate() returns it — the server never re-exposes the
+  // plaintext, so a fresh page load leaves `code` null even though an
+  // active code exists (reflected by `status`/metadata).
+  inviteCode: {
+    code: string | null;
+    status: "none" | "active";
+    createdAt?: string;
+    usageCount?: number;
+    maxUses?: number | null;
+    expiresAt?: string | null;
+  } | null;
+  fetchInviteCode: () => Promise<void>;
+  generateInviteCode: () => Promise<void>;
+  revokeInviteCode: () => Promise<void>;
+  resolveInviteCode: (code: string) => Promise<{
+    status: "valid" | "already_member" | "invalid" | "expired" | "revoked" | "limit_reached";
+    message?: string;
+    workspaceName?: string;
+    projectId?: string;
+  } | null>;
+  acceptInviteCode: (code: string) => Promise<{ alreadyMember?: boolean; projectId: string; workspaceName: string } | null>;
 
   setProjectId: (id: string) => void;
   // Switches to a brand-new, not-yet-real workspace context — no backend
@@ -282,6 +341,10 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
   },
   workspaces: [],
   workspacesLoading: false,
+  role: null,
+  members: [],
+  membersLoading: false,
+  inviteCode: null,
   inputs: [],
   understanding: null,
   ideaPrd: null,
@@ -347,10 +410,12 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
       const res = await fetch(`${API_URL}/pmx/projects`, { headers });
       const json = await res.json();
       if (json.success) {
-        set({ workspaces: json.data });
+        const workspaces = json.data as PmxWorkspaceSummary[];
+        const active = workspaces.find((w) => w.projectId === get().projectId);
+        set({ workspaces, role: active?.role ?? null });
         // Drop any open tabs pointing at workspaces that no longer exist
         // (e.g. deleted from another session), but never drop the last one.
-        const liveIds = new Set((json.data as PmxWorkspaceSummary[]).map((w) => w.projectId));
+        const liveIds = new Set(workspaces.map((w) => w.projectId));
         const tabs = get().openTabIds;
         const pruned = tabs.filter((id) => liveIds.has(id) || id === get().projectId);
         if (pruned.length && pruned.length !== tabs.length) {
@@ -549,6 +614,7 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
 
   fetchAll: async () => {
     await Promise.all([
+      get().fetchWorkspaces(),
       get().fetchInputs(),
       get().fetchUnderstanding(),
       get().fetchIdeaPrd(),
@@ -615,5 +681,170 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
       console.error(err);
       return false;
     }
-  }
+  },
+
+  fetchMembers: async () => {
+    set({ membersLoading: true });
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/members`, { headers });
+      const json = await res.json();
+      if (json.success) set({ members: json.data });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      set({ membersLoading: false });
+    }
+  },
+
+  changeMemberRole: async (memberId, role) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/members/${memberId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ role }),
+      });
+      const json = await res.json();
+      if (!json.success) return false;
+      await get().fetchMembers();
+      return true;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
+  },
+
+  removeMember: async (memberId) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/members/${memberId}`, {
+        method: "DELETE",
+        headers,
+      });
+      const json = await res.json();
+      if (!json.success) return false;
+      await get().fetchMembers();
+      return true;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
+  },
+
+  fetchInviteCode: async () => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes/current`, { headers });
+      const json = await res.json();
+      if (!json.success) return;
+      if (!json.data.exists) {
+        set({ inviteCode: { code: null, status: "none" } });
+        return;
+      }
+      // Preserve a plaintext code already held in memory from this
+      // session's own generate() call — a metadata refresh shouldn't blank
+      // it out from under the settings page.
+      const existingCode = get().inviteCode?.code ?? null;
+      set({
+        inviteCode: {
+          code: existingCode,
+          status: "active",
+          createdAt: json.data.createdAt,
+          usageCount: json.data.usageCount,
+          maxUses: json.data.maxUses,
+          expiresAt: json.data.expiresAt,
+        },
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
+  generateInviteCode: async () => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes/generate`, {
+        method: "POST",
+        headers,
+      });
+      const json = await res.json();
+      if (json.success) {
+        set({
+          inviteCode: {
+            code: json.data.code,
+            status: "active",
+            createdAt: json.data.createdAt,
+            usageCount: 0,
+            maxUses: json.data.maxUses,
+            expiresAt: json.data.expiresAt,
+          },
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
+  revokeInviteCode: async () => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes/revoke`, {
+        method: "POST",
+        headers,
+      });
+      const json = await res.json();
+      if (json.success) set({ inviteCode: { code: null, status: "none" } });
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
+  resolveInviteCode: async (code) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/invite-codes/resolve`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ code }),
+      });
+      const json = await res.json();
+      return json.success ? json.data : null;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  },
+
+  acceptInviteCode: async (code) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/invite-codes/accept`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ code }),
+      });
+      const json = await res.json();
+      if (!json.success) return null;
+      get().setProjectId(json.data.projectId);
+      return json.data;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  },
+
+  acceptInvite: async (token) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/invite/${token}/accept`, { method: "POST", headers });
+      const json = await res.json();
+      if (!json.success) return null;
+      get().setProjectId(json.data.projectId);
+      return json.data;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  },
 }));
