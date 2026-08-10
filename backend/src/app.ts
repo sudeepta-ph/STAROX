@@ -35,6 +35,7 @@ const allowedOrigins = [
   env.FRONTEND_ORIGIN,
   "https://starox.space",
   "https://www.starox.space",
+  "https://starox-frontend.vercel.app",
   // Vite falls back to the next free port (5174, 5175, ...) whenever 5173
   // is already taken by another dev server — allow the common range so
   // that doesn't silently break every API call with a CORS error.
