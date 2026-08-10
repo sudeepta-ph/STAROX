@@ -4,7 +4,6 @@ import helmet from "helmet";
 import morgan from "morgan";
 import { env } from "./config/env";
 import { healthRouter } from "./api/routes/health";
-import { netDiagRouter } from "./api/routes/netDiag";
 import { proxyRouter } from "./workspaces/pmx/routes/proxy";
 import { screenshotRouter } from "./workspaces/pmx/routes/screenshot";
 import { integrationsRouter } from "./workspaces/pmx/routes/integrations";
@@ -57,7 +56,6 @@ app.use(express.json({ limit: "10mb" }));
 app.use(morgan("tiny"));
 
 app.use("/health", healthRouter);
-app.use("/api", netDiagRouter);
 app.use("/api", integrationsRouter);
 app.use("/api", githubRouter);
 app.use("/api", googleRouter);
