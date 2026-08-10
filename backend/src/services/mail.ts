@@ -21,6 +21,12 @@ function getTransporter(): nodemailer.Transporter {
     port: Number(env.SMTP_PORT || 587),
     secure: env.SMTP_SECURE === "true",
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
+    // Nodemailer's defaults (2min connect / 10min socket) let a stalled
+    // SMTP handshake — e.g. a port/secure mismatch — hang the request for
+    // minutes instead of failing fast.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
   });
   return transporter;
 }
