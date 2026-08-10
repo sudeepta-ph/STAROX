@@ -21,6 +21,10 @@ function getTransporter(): nodemailer.Transporter {
     port: Number(env.SMTP_PORT || 587),
     secure: env.SMTP_SECURE === "true",
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
+    // Render has no outbound IPv6 route; smtp.hostinger.com resolves to both
+    // an A and AAAA record and Node picks the AAAA one by default, which
+    // then fails with ENETUNREACH. Force IPv4 resolution for the socket.
+    family: 4,
     // Nodemailer's defaults (2min connect / 10min socket) let a stalled
     // SMTP handshake — e.g. a port/secure mismatch — hang the request for
     // minutes instead of failing fast.
