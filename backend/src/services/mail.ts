@@ -1,5 +1,4 @@
 import nodemailer from "nodemailer";
-import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import path from "path";
 import { env } from "../config/env";
 
@@ -17,26 +16,20 @@ function getTransporter(): nodemailer.Transporter {
       "Email is not configured — set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in the backend .env to enable sending."
     );
   }
-  // `family` isn't in @types/nodemailer's Options, but nodemailer forwards
-  // unknown options straight to the underlying net/tls socket, so it's
-  // typed here via an intersection rather than dropped or `any`-cast.
-  const options: SMTPTransport.Options & { family?: number } = {
+  transporter = nodemailer.createTransport({
     host: env.SMTP_HOST,
     port: Number(env.SMTP_PORT || 587),
     secure: env.SMTP_SECURE === "true",
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
-    // Render has no outbound IPv6 route; smtp.hostinger.com resolves to both
-    // an A and AAAA record and Node picks the AAAA one by default, which
-    // then fails with ENETUNREACH. Force IPv4 resolution for the socket.
-    family: 4,
     // Nodemailer's defaults (2min connect / 10min socket) let a stalled
     // SMTP handshake — e.g. a port/secure mismatch — hang the request for
-    // minutes instead of failing fast.
+    // minutes instead of failing fast. IPv4-vs-IPv6 routing is handled
+    // process-wide in index.ts (dns.setDefaultResultOrder), since
+    // nodemailer doesn't forward a `family` option to the socket.
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 15_000,
-  };
-  transporter = nodemailer.createTransport(options);
+  });
   return transporter;
 }
 
