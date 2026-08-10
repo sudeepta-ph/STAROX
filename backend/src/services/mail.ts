@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import dns from "dns";
 import path from "path";
 import { env } from "../config/env";
 
@@ -9,23 +10,34 @@ const LOGO_PATH = path.join(__dirname, "../assets/email/strx-logo.png");
 
 let transporter: nodemailer.Transporter | null = null;
 
-function getTransporter(): nodemailer.Transporter {
+async function getTransporter(): Promise<nodemailer.Transporter> {
   if (transporter) return transporter;
   if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASSWORD) {
     throw new Error(
       "Email is not configured — set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in the backend .env to enable sending."
     );
   }
+
+  // SMTP_HOST resolves to both an A and AAAA record (e.g. Hostinger's mail
+  // is Cloudflare-proxied). Nodemailer's own DNS resolution (lib/shared's
+  // resolveHostname) concatenates both address families and picks one at
+  // random to dial — it doesn't go through Node's dns.lookup, so neither a
+  // `family` option nor dns.setDefaultResultOrder affects it. That means
+  // roughly half of all sends hit the IPv6 address, which Render can't
+  // route to (ENETUNREACH). Resolve the IPv4 address ourselves and connect
+  // to it directly; keep the real hostname as the TLS servername so
+  // certificate validation still passes.
+  const [ipv4] = await dns.promises.resolve4(env.SMTP_HOST);
+
   transporter = nodemailer.createTransport({
-    host: env.SMTP_HOST,
+    host: ipv4,
     port: Number(env.SMTP_PORT || 587),
     secure: env.SMTP_SECURE === "true",
+    tls: { servername: env.SMTP_HOST },
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
     // Nodemailer's defaults (2min connect / 10min socket) let a stalled
     // SMTP handshake — e.g. a port/secure mismatch — hang the request for
-    // minutes instead of failing fast. IPv4-vs-IPv6 routing is handled
-    // process-wide in index.ts (dns.setDefaultResultOrder), since
-    // nodemailer doesn't forward a `family` option to the socket.
+    // minutes instead of failing fast.
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 15_000,
@@ -52,7 +64,7 @@ export interface DemoRequestInput {
 // surfaces as one clear error to the route handler rather than silently
 // sending only one side.
 export async function sendDemoRequestEmails(input: DemoRequestInput): Promise<void> {
-  const t = getTransporter();
+  const t = await getTransporter();
   const fullName = `${input.firstName} ${input.lastName}`.trim();
   const subjectContext = input.context ? ` — ${input.context}` : "";
 
@@ -135,7 +147,7 @@ export interface BlogPublishedEmailInput {
 // send exists in this codebase yet, so a loop (not a new provider feature)
 // is the deliberate v1 approach here, same as every other email in this file.
 export async function sendBlogPublishedEmail(input: BlogPublishedEmailInput): Promise<void> {
-  const t = getTransporter();
+  const t = await getTransporter();
   const excerpt = input.excerpt?.trim() || "";
 
   await t.sendMail({
@@ -198,7 +210,7 @@ export interface WorkspaceInviteEmailInput {
 // so this function is intentionally a thin, throwing wrapper with no
 // internal try/catch of its own.
 export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput): Promise<void> {
-  const t = getTransporter();
+  const t = await getTransporter();
   await t.sendMail({
     from: FROM_ADDRESS(),
     to: input.toEmail,
