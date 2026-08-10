@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 import path from "path";
 import { env } from "../config/env";
 
@@ -16,7 +17,10 @@ function getTransporter(): nodemailer.Transporter {
       "Email is not configured — set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in the backend .env to enable sending."
     );
   }
-  transporter = nodemailer.createTransport({
+  // `family` isn't in @types/nodemailer's Options, but nodemailer forwards
+  // unknown options straight to the underlying net/tls socket, so it's
+  // typed here via an intersection rather than dropped or `any`-cast.
+  const options: SMTPTransport.Options & { family?: number } = {
     host: env.SMTP_HOST,
     port: Number(env.SMTP_PORT || 587),
     secure: env.SMTP_SECURE === "true",
@@ -31,7 +35,8 @@ function getTransporter(): nodemailer.Transporter {
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 15_000,
-  });
+  };
+  transporter = nodemailer.createTransport(options);
   return transporter;
 }
 
