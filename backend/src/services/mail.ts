@@ -35,12 +35,15 @@ async function getTransporter(): Promise<nodemailer.Transporter> {
     secure: env.SMTP_SECURE === "true",
     tls: { servername: env.SMTP_HOST },
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
-    // Nodemailer's defaults (2min connect / 10min socket) let a stalled
-    // SMTP handshake — e.g. a port/secure mismatch — hang the request for
-    // minutes instead of failing fast.
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
+    // Render's network adds several seconds of latency on outbound SMTP
+    // ports specifically (~5s just for the raw TCP handshake, measured
+    // directly) before the connection goes through — these need enough
+    // headroom to survive that plus the TLS handshake and full SMTP
+    // conversation, while still bounding a genuinely stuck connection well
+    // under nodemailer's multi-minute defaults.
+    connectionTimeout: 20_000,
+    greetingTimeout: 20_000,
+    socketTimeout: 30_000,
   });
   return transporter;
 }
