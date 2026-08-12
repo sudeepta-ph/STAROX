@@ -50,6 +50,24 @@ async function getTransporter(): Promise<nodemailer.Transporter> {
 
 const FROM_ADDRESS = () => `${env.SMTP_FROM_NAME} <${env.SMTP_FROM_EMAIL}>`;
 
+// The IPv4 address resolved in getTransporter() is cached in the module-level
+// `transporter` for the process's whole lifetime. Hostinger's mail hostname
+// is Cloudflare-proxied behind multiple IPs — if the one we happened to
+// resolve on first use degrades, every send afterward keeps dialing that
+// same bad IP indefinitely, which looks like an unexplained intermittent
+// timeout. On failure, drop the cached transporter so the retry re-resolves
+// DNS and (most likely) lands on a different, healthy IP.
+async function sendMail(options: Parameters<nodemailer.Transporter["sendMail"]>[0]): Promise<void> {
+  try {
+    const t = await getTransporter();
+    await t.sendMail(options);
+  } catch (err) {
+    transporter = null;
+    const t = await getTransporter();
+    await t.sendMail(options);
+  }
+}
+
 export interface DemoRequestInput {
   firstName: string;
   lastName: string;
@@ -67,7 +85,6 @@ export interface DemoRequestInput {
 // surfaces as one clear error to the route handler rather than silently
 // sending only one side.
 export async function sendDemoRequestEmails(input: DemoRequestInput): Promise<void> {
-  const t = await getTransporter();
   const fullName = `${input.firstName} ${input.lastName}`.trim();
   const subjectContext = input.context ? ` — ${input.context}` : "";
 
@@ -77,7 +94,7 @@ export async function sendDemoRequestEmails(input: DemoRequestInput): Promise<vo
       <td style="padding: 6px 0; font-size: 14px; color: #1a1a1a;">${value}</td>
     </tr>`;
 
-  await t.sendMail({
+  await sendMail({
     from: FROM_ADDRESS(),
     to: env.CONTACT_TO_EMAIL,
     replyTo: input.email,
@@ -115,7 +132,7 @@ export async function sendDemoRequestEmails(input: DemoRequestInput): Promise<vo
     ],
   });
 
-  await t.sendMail({
+  await sendMail({
     from: FROM_ADDRESS(),
     to: input.email,
     subject: "We've got your demo request — STAROX",
@@ -150,10 +167,9 @@ export interface BlogPublishedEmailInput {
 // send exists in this codebase yet, so a loop (not a new provider feature)
 // is the deliberate v1 approach here, same as every other email in this file.
 export async function sendBlogPublishedEmail(input: BlogPublishedEmailInput): Promise<void> {
-  const t = await getTransporter();
   const excerpt = input.excerpt?.trim() || "";
 
-  await t.sendMail({
+  await sendMail({
     from: FROM_ADDRESS(),
     to: input.toEmail,
     subject: `New on the STAROX Blog: ${input.title}`,
@@ -213,8 +229,7 @@ export interface WorkspaceInviteEmailInput {
 // so this function is intentionally a thin, throwing wrapper with no
 // internal try/catch of its own.
 export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput): Promise<void> {
-  const t = await getTransporter();
-  await t.sendMail({
+  await sendMail({
     from: FROM_ADDRESS(),
     to: input.toEmail,
     subject: `${input.inviterName} invited you to join "${input.workspaceName}" on STAROX PMX`,
