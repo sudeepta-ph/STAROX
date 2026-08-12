@@ -20,7 +20,7 @@ function getClient(): Resend {
   return resend;
 }
 
-const FROM_ADDRESS = () => `${env.SMTP_FROM_NAME} <${env.SMTP_FROM_EMAIL}>`;
+const FROM_ADDRESS = () => `${env.MAIL_FROM_NAME} <${env.MAIL_FROM_EMAIL}>`;
 
 const LOGO_ATTACHMENT = { filename: "strx-logo.png", content: LOGO_BUFFER, contentId: "strx-logo" };
 

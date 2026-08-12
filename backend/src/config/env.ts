@@ -82,8 +82,8 @@ const envSchema = z.object({
   // resolution, generous timeouts, and DNS-refresh retries all still hit a
   // hard connection timeout every time) — Resend's HTTPS API sidesteps that.
   RESEND_API_KEY:   z.string().optional(),
-  SMTP_FROM_NAME:   z.string().default("Starox"),
-  SMTP_FROM_EMAIL:  z.string().default("noreply@starox.space"),
+  MAIL_FROM_NAME:   z.string().default("Starox"),
+  MAIL_FROM_EMAIL:  z.string().default("noreply@starox.space"),
   CONTACT_TO_EMAIL: z.string().default("hello@starox.space"),
 });
 
