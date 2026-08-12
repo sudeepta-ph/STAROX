@@ -7,9 +7,7 @@
  * All other integrations (GitHub, Jira, Vercel, Notion, Intercom, Zendesk)
  * have been removed — they are not part of Starox 1's data model.
  */
-import {
-  doc, setDoc, deleteDoc, onSnapshot, collection, serverTimestamp, type Unsubscribe,
-} from "firebase/firestore";
+import { onSnapshot, collection, type Unsubscribe } from "firebase/firestore";
 import { db } from "./firebase";
 
 export type IntegrationId =
@@ -48,19 +46,6 @@ export const ALL_INTEGRATION_IDS: IntegrationId[] = [
 
 const emptyConnected = (): Record<IntegrationId, Integration | null> =>
   Object.fromEntries(ALL_INTEGRATION_IDS.map((id) => [id, null])) as Record<IntegrationId, Integration | null>;
-
-export async function saveIntegration(
-  userId: string,
-  id: IntegrationId,
-  data: Omit<Integration, "id" | "connectedAt">
-) {
-  const ref = doc(db, "users", userId, "integrations", id);
-  await setDoc(ref, { id, ...data, connectedAt: serverTimestamp() });
-}
-
-export async function removeIntegration(userId: string, id: IntegrationId) {
-  await deleteDoc(doc(db, "users", userId, "integrations", id));
-}
 
 export function subscribeIntegrations(
   userId: string,

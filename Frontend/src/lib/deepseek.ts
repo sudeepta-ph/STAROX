@@ -1,39 +1,25 @@
-const DEEPSEEK_API_KEY = (import.meta.env.VITE_DEEPSEEK_API_KEY as string) || "";
-const DEFAULT_MODEL = (import.meta.env.VITE_DEEPSEEK_MODEL as string) || "deepseek-chat";
-const BASE_URL = (import.meta.env.VITE_DEEPSEEK_BASE_URL as string) || "https://api.deepseek.com";
+const API_BASE = (import.meta.env.VITE_API_URL as string) || "http://localhost:8080/api";
 
+// Proxied through the backend (POST /api/starox1/analyze) rather than
+// calling DeepSeek directly — a VITE_-prefixed key would ship in the public
+// JS bundle, readable by any visitor via devtools/the built bundle, with no
+// rate limiting. The real DEEPSEEK_API_KEY now lives server-side only (see
+// backend/src/api/routes/starox1.ts).
 export async function callDeepSeek(system: string, user: string): Promise<string> {
-  if (!DEEPSEEK_API_KEY) {
-    throw new Error("Missing VITE_DEEPSEEK_API_KEY environment variable.");
-  }
-
-  const endpoint = `${BASE_URL}/chat/completions`;
-  const response = await fetch(endpoint, {
+  const response = await fetch(`${API_BASE}/starox1/analyze`, {
     method: "POST",
-    headers: {
-      "Authorization": `Bearer ${DEEPSEEK_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: DEFAULT_MODEL,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0.3,
-      response_format: { type: "json_object" },
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ system, user }),
   });
 
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`DeepSeek error ${response.status}: ${err}`);
+    throw new Error(`STAROX-1 analysis failed (${response.status}): ${err}`);
   }
 
-  const data = await response.json() as { choices: Array<{ message: { content: string } }> };
-  const content = data.choices?.[0]?.message?.content ?? "";
-  if (!content) throw new Error("Empty response from AI");
-  return content;
+  const data = await response.json() as { content: string };
+  if (!data.content) throw new Error("Empty response from AI");
+  return data.content;
 }
 
 export function parseJson<T>(raw: string): T {
