@@ -24,7 +24,10 @@ export async function notifyBlogSubscribers(post: IBlog): Promise<void> {
   }
 
   const subscribers = await BlogSubscriberModel.find({ status: "active" });
-  if (subscribers.length === 0) return;
+  if (subscribers.length === 0) {
+    console.log(`[Blog Notify] Post "${post.title}" (${post._id}): no active subscribers, nothing to send.`);
+    return;
+  }
 
   const articleUrl = `${env.FRONTEND_ORIGIN}/blog/${post.slug}`;
 
