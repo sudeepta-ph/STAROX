@@ -47,9 +47,12 @@ export async function notifyBlogSubscribers(post: IBlog): Promise<void> {
 
   const logRows = results.map((result, i) => {
     const sub = subscribers[i];
-    return result.status === "fulfilled"
-      ? { postId: post._id, subscriberId: sub._id, email: sub.email, status: "sent" as const, sentAt: new Date() }
-      : { postId: post._id, subscriberId: sub._id, email: sub.email, status: "failed" as const, error: String(result.reason?.message ?? result.reason), sentAt: new Date() };
+    if (result.status === "fulfilled") {
+      return { postId: post._id, subscriberId: sub._id, email: sub.email, status: "sent" as const, sentAt: new Date() };
+    }
+    const error = String(result.reason?.message ?? result.reason);
+    console.error(`[Blog Notify] Send failed for ${sub.email} (post ${post._id}):`, error);
+    return { postId: post._id, subscriberId: sub._id, email: sub.email, status: "failed" as const, error, sentAt: new Date() };
   });
 
   await BlogNotificationLogModel.insertMany(logRows).catch((err) =>
