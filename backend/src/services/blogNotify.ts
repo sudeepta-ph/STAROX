@@ -24,10 +24,7 @@ export async function notifyBlogSubscribers(post: IBlog): Promise<void> {
   }
 
   const subscribers = await BlogSubscriberModel.find({ status: "active" });
-  if (subscribers.length === 0) {
-    console.log(`[Blog Notify] Post "${post.title}" (${post._id}): no active subscribers, nothing to send.`);
-    return;
-  }
+  if (subscribers.length === 0) return;
 
   const articleUrl = `${env.FRONTEND_ORIGIN}/blog/${post.slug}`;
 
@@ -47,12 +44,9 @@ export async function notifyBlogSubscribers(post: IBlog): Promise<void> {
 
   const logRows = results.map((result, i) => {
     const sub = subscribers[i];
-    if (result.status === "fulfilled") {
-      return { postId: post._id, subscriberId: sub._id, email: sub.email, status: "sent" as const, sentAt: new Date() };
-    }
-    const error = String(result.reason?.message ?? result.reason);
-    console.error(`[Blog Notify] Send failed for ${sub.email} (post ${post._id}):`, error);
-    return { postId: post._id, subscriberId: sub._id, email: sub.email, status: "failed" as const, error, sentAt: new Date() };
+    return result.status === "fulfilled"
+      ? { postId: post._id, subscriberId: sub._id, email: sub.email, status: "sent" as const, sentAt: new Date() }
+      : { postId: post._id, subscriberId: sub._id, email: sub.email, status: "failed" as const, error: String(result.reason?.message ?? result.reason), sentAt: new Date() };
   });
 
   await BlogNotificationLogModel.insertMany(logRows).catch((err) =>

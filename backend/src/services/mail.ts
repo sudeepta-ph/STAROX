@@ -1,5 +1,5 @@
-import nodemailer from "nodemailer";
-import dns from "dns";
+import { Resend } from "resend";
+import fs from "fs";
 import path from "path";
 import { env } from "../config/env";
 
@@ -7,64 +7,45 @@ import { env } from "../config/env";
 // email templates don't depend on the Frontend project's file layout —
 // backend and frontend can be deployed as separate services.
 const LOGO_PATH = path.join(__dirname, "../assets/email/strx-logo.png");
+const LOGO_BUFFER = fs.readFileSync(LOGO_PATH);
 
-let transporter: nodemailer.Transporter | null = null;
+let resend: Resend | null = null;
 
-async function getTransporter(): Promise<nodemailer.Transporter> {
-  if (transporter) return transporter;
-  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASSWORD) {
-    throw new Error(
-      "Email is not configured — set SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASSWORD in the backend .env to enable sending."
-    );
+function getClient(): Resend {
+  if (resend) return resend;
+  if (!env.RESEND_API_KEY) {
+    throw new Error("Email is not configured — set RESEND_API_KEY in the backend .env to enable sending.");
   }
-
-  // SMTP_HOST resolves to both an A and AAAA record (e.g. Hostinger's mail
-  // is Cloudflare-proxied). Nodemailer's own DNS resolution (lib/shared's
-  // resolveHostname) concatenates both address families and picks one at
-  // random to dial — it doesn't go through Node's dns.lookup, so neither a
-  // `family` option nor dns.setDefaultResultOrder affects it. That means
-  // roughly half of all sends hit the IPv6 address, which Render can't
-  // route to (ENETUNREACH). Resolve the IPv4 address ourselves and connect
-  // to it directly; keep the real hostname as the TLS servername so
-  // certificate validation still passes.
-  const [ipv4] = await dns.promises.resolve4(env.SMTP_HOST);
-
-  transporter = nodemailer.createTransport({
-    host: ipv4,
-    port: Number(env.SMTP_PORT || 587),
-    secure: env.SMTP_SECURE === "true",
-    tls: { servername: env.SMTP_HOST },
-    auth: { user: env.SMTP_USER, pass: env.SMTP_PASSWORD },
-    // Render's network adds several seconds of latency on outbound SMTP
-    // ports specifically (~5s just for the raw TCP handshake, measured
-    // directly) before the connection goes through — these need enough
-    // headroom to survive that plus the TLS handshake and full SMTP
-    // conversation, while still bounding a genuinely stuck connection well
-    // under nodemailer's multi-minute defaults.
-    connectionTimeout: 20_000,
-    greetingTimeout: 20_000,
-    socketTimeout: 30_000,
-  });
-  return transporter;
+  resend = new Resend(env.RESEND_API_KEY);
+  return resend;
 }
 
 const FROM_ADDRESS = () => `${env.SMTP_FROM_NAME} <${env.SMTP_FROM_EMAIL}>`;
 
-// The IPv4 address resolved in getTransporter() is cached in the module-level
-// `transporter` for the process's whole lifetime. Hostinger's mail hostname
-// is Cloudflare-proxied behind multiple IPs — if the one we happened to
-// resolve on first use degrades, every send afterward keeps dialing that
-// same bad IP indefinitely, which looks like an unexplained intermittent
-// timeout. On failure, drop the cached transporter so the retry re-resolves
-// DNS and (most likely) lands on a different, healthy IP.
-async function sendMail(options: Parameters<nodemailer.Transporter["sendMail"]>[0]): Promise<void> {
-  try {
-    const t = await getTransporter();
-    await t.sendMail(options);
-  } catch (err) {
-    transporter = null;
-    const t = await getTransporter();
-    await t.sendMail(options);
+const LOGO_ATTACHMENT = { filename: "strx-logo.png", content: LOGO_BUFFER, contentId: "strx-logo" };
+
+interface SendMailOptions {
+  to: string;
+  replyTo?: string;
+  subject: string;
+  text?: string;
+  html: string;
+  attachments?: { filename: string; content: Buffer; contentId: string }[];
+}
+
+// Raw SMTP from Render to Hostinger's mail server proved reliably blocked at
+// the network level — confirmed by exhausting every application-side fix
+// (IPv4-only DNS resolution, the correct STARTTLS port, generous timeouts,
+// re-resolution retries) and still hitting a hard connection timeout on
+// every single send. Resend's HTTPS API isn't subject to that block.
+async function sendMail(options: SendMailOptions): Promise<void> {
+  const client = getClient();
+  const { error } = await client.emails.send({
+    from: FROM_ADDRESS(),
+    ...options,
+  });
+  if (error) {
+    throw new Error(error.message);
   }
 }
 
@@ -95,7 +76,6 @@ export async function sendDemoRequestEmails(input: DemoRequestInput): Promise<vo
     </tr>`;
 
   await sendMail({
-    from: FROM_ADDRESS(),
     to: env.CONTACT_TO_EMAIL,
     replyTo: input.email,
     subject: `New demo request${subjectContext}: ${fullName}`,
@@ -127,13 +107,10 @@ export async function sendDemoRequestEmails(input: DemoRequestInput): Promise<vo
         <p style="font-size: 14px; line-height: 1.6; color: #1a1a1a; margin: 0; white-space: pre-wrap;">${input.problem || "—"}</p>
       </div>
     `,
-    attachments: [
-      { filename: "strx-logo.png", path: LOGO_PATH, cid: "strx-logo" },
-    ],
+    attachments: [LOGO_ATTACHMENT],
   });
 
   await sendMail({
-    from: FROM_ADDRESS(),
     to: input.email,
     subject: "We've got your demo request — STAROX",
     html: `
@@ -148,9 +125,7 @@ export async function sendDemoRequestEmails(input: DemoRequestInput): Promise<vo
         </p>
       </div>
     `,
-    attachments: [
-      { filename: "strx-logo.png", path: LOGO_PATH, cid: "strx-logo" },
-    ],
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -170,7 +145,6 @@ export async function sendBlogPublishedEmail(input: BlogPublishedEmailInput): Pr
   const excerpt = input.excerpt?.trim() || "";
 
   await sendMail({
-    from: FROM_ADDRESS(),
     to: input.toEmail,
     subject: `New on the STAROX Blog: ${input.title}`,
     text: [
@@ -209,9 +183,7 @@ export async function sendBlogPublishedEmail(input: BlogPublishedEmailInput): Pr
         </div>
       </div>
     `,
-    attachments: [
-      { filename: "strx-logo.png", path: LOGO_PATH, cid: "strx-logo" },
-    ],
+    attachments: [LOGO_ATTACHMENT],
   });
 }
 
@@ -230,7 +202,6 @@ export interface WorkspaceInviteEmailInput {
 // internal try/catch of its own.
 export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput): Promise<void> {
   await sendMail({
-    from: FROM_ADDRESS(),
     to: input.toEmail,
     subject: `${input.inviterName} invited you to join "${input.workspaceName}" on STAROX PMX`,
     text: [
@@ -253,8 +224,6 @@ export async function sendWorkspaceInviteEmail(input: WorkspaceInviteEmailInput)
         </p>
       </div>
     `,
-    attachments: [
-      { filename: "strx-logo.png", path: LOGO_PATH, cid: "strx-logo" },
-    ],
+    attachments: [LOGO_ATTACHMENT],
   });
 }
