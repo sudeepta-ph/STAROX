@@ -23,9 +23,18 @@ export const authMiddleware = async (
     }
 
     const token = authHeader.split(' ')[1];
-    
-    // Verify Clerk Token
-    const verifiedToken = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
+
+    // Verify Clerk Token. clockSkewInMs widens Clerk's own default (5000ms —
+    // see @clerk/backend's DEFAULT_CLOCK_SKEW_IN_MS) to 10000ms: dev/hosting
+    // machines can drift a few seconds from Clerk's issuing clock, which
+    // otherwise intermittently fails the iat/exp/nbf checks below with
+    // "issued at date claim (iat) is in the future" even for a genuinely
+    // valid, freshly-issued token. This does not disable or loosen claim
+    // verification itself — exp/nbf/iat are still fully checked, just with
+    // a slightly wider, officially-supported tolerance window instead of
+    // Clerk's default, which this codebase's observed drift (5-7s) sits
+    // right at the edge of.
+    const verifiedToken = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY, clockSkewInMs: 10_000 });
     const clerkUserId = verifiedToken.sub;
     
     if (!clerkUserId) {
@@ -118,7 +127,8 @@ export const optionalAuth = async (
     
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.split(' ')[1];
-      const verifiedToken = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
+      // Same widened tolerance as authMiddleware above — see the comment there.
+      const verifiedToken = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY, clockSkewInMs: 10_000 });
       const clerkUserId = verifiedToken.sub;
       
       if (clerkUserId) {

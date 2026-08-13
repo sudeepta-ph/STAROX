@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import {
-  Package, Plus, ExternalLink, Trash2, Search, Loader2, Clock, Database, Check, X, Pencil,
+  Package, Plus, ExternalLink, Trash2, Search, Loader2, Clock, Database, Check, X, Pencil, KeyRound, Users,
 } from "lucide-react";
-import { usePmxStore, type PmxWorkspaceSummary } from "@/lib/pmxStore";
+import { usePmxStore, type PmxWorkspaceSummary, PMX_ROLE_LABELS } from "@/lib/pmxStore";
 import { useToast } from "@/components/ui/use-toast";
+import JoinWorkspaceModal from "@/components/pmx/JoinWorkspaceModal";
 
 function sourceTag(w: PmxWorkspaceSummary): string {
   if (w.isProject) return `Project · ${w.sourceCount} source${w.sourceCount === 1 ? "" : "s"}`;
@@ -13,24 +14,42 @@ function sourceTag(w: PmxWorkspaceSummary): string {
   return "No sources yet";
 }
 
+function joinedTag(w: PmxWorkspaceSummary): string {
+  const date = new Date(w.joinedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+  return `Joined ${date}`;
+}
+
 export default function PmxProducts() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { workspaces, workspacesLoading, fetchWorkspaces, startFreshWorkspace, renameWorkspace, projectId, setProjectId, deleteProject } = usePmxStore();
+  const {
+    workspaces, workspacesLoading, fetchWorkspaces, startFreshWorkspace, renameWorkspace, projectId, setProjectId, deleteProject,
+    members, fetchMembers,
+  } = usePmxStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<PmxWorkspaceSummary | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [savingRename, setSavingRename] = useState(false);
+  const [joinModalOpen, setJoinModalOpen] = useState(false);
 
   useEffect(() => { fetchWorkspaces(); }, [fetchWorkspaces]);
+  // Only the active workspace's members are ever loaded client-side, so
+  // member-name search (spec calls this optional) is scoped to that one —
+  // matching every joined workspace's roster would mean an N+1 fetch per
+  // card, which isn't worth it for a search convenience feature.
+  useEffect(() => { fetchMembers(); }, [fetchMembers, projectId]);
 
-  const filtered = workspaces.filter(w =>
-    !searchQuery ||
-    w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    w.primarySource?.url?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const query = searchQuery.trim().toLowerCase();
+  const activeMemberNames = projectId ? members.map(m => m.name.toLowerCase()) : [];
+  const filtered = workspaces.filter(w => {
+    if (!query) return true;
+    if (w.name.toLowerCase().includes(query)) return true;
+    if (w.primarySource?.url?.toLowerCase().includes(query)) return true;
+    if (w.projectId === projectId && activeMemberNames.some(n => n.includes(query))) return true;
+    return false;
+  });
 
   const openProduct = (w: PmxWorkspaceSummary) => {
     setProjectId(w.projectId);
@@ -106,13 +125,22 @@ export default function PmxProducts() {
               Every product workspace PMX is tracking for you — switch, create, or clean up from here.
             </p>
           </div>
-          <button
-            onClick={createProduct}
-            className="shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary hover:bg-primary/90 px-4 py-2.5 text-xs font-semibold text-primary-foreground transition-all duration-200 shadow-[0_2px_12px_rgba(56,189,248,0.22)] hover:shadow-[0_4px_20px_rgba(56,189,248,0.35)]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New Product
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setJoinModalOpen(true)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-muted/60 hover:bg-muted px-4 py-2.5 text-xs font-semibold text-foreground transition-all duration-200"
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              Join Workspace
+            </button>
+            <button
+              onClick={createProduct}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-primary hover:bg-primary/90 px-4 py-2.5 text-xs font-semibold text-primary-foreground transition-all duration-200 shadow-[0_2px_12px_rgba(56,189,248,0.22)] hover:shadow-[0_4px_20px_rgba(56,189,248,0.35)]"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New Product
+            </button>
+          </div>
         </motion.div>
 
         {/* Search */}
@@ -194,7 +222,7 @@ export default function PmxProducts() {
                           <Check className="h-2.5 w-2.5" /> Active
                         </span>
                       )}
-                      {w.role !== "member" && (
+                      {(w.role === "owner" || w.role === "admin") && (
                         <button
                           onClick={(e) => startRename(w, e)}
                           title="Rename product"
@@ -230,6 +258,16 @@ export default function PmxProducts() {
                       {new Date(w.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" })}
                     </span>
                   </div>
+                  <div className="flex items-center justify-between text-[10px] text-muted-foreground/80 mt-1.5 pt-1.5 border-t border-border/20">
+                    <span className="flex items-center gap-1">
+                      <Users className="h-3 w-3" />{w.memberCount} member{w.memberCount === 1 ? "" : "s"}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-foreground/70 font-medium">{PMX_ROLE_LABELS[w.role]}</span>
+                      <span>·</span>
+                      <span>{joinedTag(w)}</span>
+                    </span>
+                  </div>
                 </motion.div>
               );
             })}
@@ -241,18 +279,28 @@ export default function PmxProducts() {
                   {workspaces.length === 0 ? "No products yet." : "No products match your search."}
                 </p>
                 {workspaces.length === 0 && (
-                  <button
-                    onClick={createProduct}
-                    className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-primary hover:bg-primary/90 px-4 py-2 text-xs font-semibold text-primary-foreground transition-all"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Create your first product
-                  </button>
+                  <div className="flex items-center justify-center gap-2 mt-4">
+                    <button
+                      onClick={createProduct}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-primary hover:bg-primary/90 px-4 py-2 text-xs font-semibold text-primary-foreground transition-all"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Create your first product
+                    </button>
+                    <button
+                      onClick={() => setJoinModalOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-muted/60 hover:bg-muted px-4 py-2 text-xs font-semibold text-foreground transition-all"
+                    >
+                      <KeyRound className="h-3.5 w-3.5" /> Join an existing workspace
+                    </button>
+                  </div>
                 )}
               </div>
             )}
           </div>
         )}
       </div>
+
+      <JoinWorkspaceModal isOpen={joinModalOpen} onClose={() => setJoinModalOpen(false)} />
 
       {/* Delete confirmation */}
       <AnimatePresence>

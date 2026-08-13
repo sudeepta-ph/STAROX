@@ -10,6 +10,7 @@ import {
   PmxDecisionModel,
   PmxSolutionModel,
   PmxExecutionTaskModel,
+  PmxExecutionPlanModel,
   PmxArtifactModel,
   PmxAuditLogModel,
   PmxScreenshotProjectModel,
@@ -18,7 +19,12 @@ import {
   PmxTokenUsageModel,
   PmxWorkspaceMemberModel,
   PmxWorkspaceInviteModel,
-  PmxWorkspaceInviteCodeModel
+  PmxWorkspaceInviteCodeModel,
+  PmxWorkspaceEmailInviteModel,
+  PMX_INVITE_ROLES,
+  PMX_ROLE_LABELS,
+  PmxWorkspaceRole,
+  PMX_DEPARTMENTS
 } from "../../../models/Pmx";
 import {
   generateProductUnderstanding,
@@ -30,6 +36,10 @@ import {
   combineSolutions,
   compileArtifact,
   generateExecutionTasks,
+  generateExecutionScaffold,
+  generateCustomExecutionScaffold,
+  generateDepartmentTasks,
+  generateExecutionDiff,
   refineSolutionPrd
 } from "../../../services/pmxAi";
 import { generateIdeaPrd, refineIdeaPrd } from "../../../services/pmxIdeaPrd";
@@ -37,11 +47,21 @@ import { analyzeScreenshotUI } from "../../../services/screenshotAi";
 import { runUIAudit } from "../../../services/uiAuditAi";
 import { AI_MODEL } from "../../../services/ai/models";
 import { UsageCapExceededError, HARD_DAILY_CAP_USD } from "../../../services/ai/deepseek";
+import {
+  TokenLimitExceededError,
+  TrialExpiredError,
+  USER_TOKEN_LIMIT,
+  getUserUsage,
+  getWorkspacePlanStatus,
+  getWorkspaceMemberUsage,
+} from "../../../services/pmxUsage";
 import { screenshotRouter, captureScreenshot } from "./screenshot";
-import { getMemberRole, requireWorkspaceAccess, WorkspaceScopedRequest } from "../middleware/workspaceAccess";
+import { getMemberRole, requireWorkspaceAccess, WorkspaceScopedRequest, canWrite } from "../middleware/workspaceAccess";
 import UserModel from "../../../models/User";
 import crypto from "node:crypto";
 import rateLimit from "express-rate-limit";
+import { sendWorkspaceInviteEmail } from "../../../services/mail";
+import { env } from "../../../config/env";
 
 export const pmxRouter = Router();
 
@@ -451,8 +471,9 @@ pmxRouter.get("/analytics/overview", requireWorkspaceAccess(), async (req: Authe
 pmxRouter.get("/projects", async (req: AuthenticatedRequest, res, next) => {
   try {
     const userId = req.userId!;
-    const memberships = await PmxWorkspaceMemberModel.find({ userId }, { projectId: 1, role: 1 });
+    const memberships = await PmxWorkspaceMemberModel.find({ userId }, { projectId: 1, role: 1, joinedAt: 1 });
     const roleByProject = new Map(memberships.map((m) => [m.projectId, m.role]));
+    const joinedAtByProject = new Map(memberships.map((m) => [m.projectId, m.joinedAt]));
     const projectIds = [...roleByProject.keys()];
 
     const workspaces = await PmxUnderstandingModel.find({ projectId: { $in: projectIds }, isDeleted: false });
@@ -471,6 +492,14 @@ pmxRouter.get("/projects", async (req: AuthenticatedRequest, res, next) => {
     ]);
     const inputsByProject = new Map(inputAgg.map((r) => [r._id as string, r]));
 
+    // Total member count per workspace — shown on the Workspaces page card
+    // so a joined user can see how many teammates are already there.
+    const memberAgg = await PmxWorkspaceMemberModel.aggregate([
+      { $match: { projectId: { $in: projectIds } } },
+      { $group: { _id: "$projectId", count: { $sum: 1 } } },
+    ]);
+    const memberCountByProject = new Map(memberAgg.map((r) => [r._id as string, r.count as number]));
+
     const data = workspaces
       .map((w) => {
         const agg = inputsByProject.get(w.projectId);
@@ -487,6 +516,8 @@ pmxRouter.get("/projects", async (req: AuthenticatedRequest, res, next) => {
           primarySource,
           updatedAt,
           role: roleByProject.get(w.projectId) || "member",
+          memberCount: memberCountByProject.get(w.projectId) ?? 1,
+          joinedAt: joinedAtByProject.get(w.projectId) || w.createdAt,
         };
       })
       .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
@@ -738,7 +769,7 @@ pmxRouter.put("/inputs/:id", async (req: AuthenticatedRequest, res, next) => {
     const { name, content, url } = req.body;
     const existing = await PmxInputModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!existing) return res.status(404).json({ success: false, error: "Source not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -763,7 +794,7 @@ pmxRouter.patch("/inputs/:id/archive", async (req: AuthenticatedRequest, res, ne
     const { isArchived } = req.body;
     const existing = await PmxInputModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!existing) return res.status(404).json({ success: false, error: "Source not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -789,7 +820,7 @@ pmxRouter.post("/inputs/:id/reprocess", async (req: AuthenticatedRequest, res, n
   try {
     const input = await PmxInputModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!input) return res.status(404).json({ success: false, error: "Source not found" });
-    if (!(await getMemberRole(input.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(input.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -838,7 +869,7 @@ pmxRouter.post("/history/sessions/:id/rerun", async (req: AuthenticatedRequest, 
   try {
     const session = await PmxSessionModel.findOne({ _id: req.params.id });
     if (!session) return res.status(404).json({ success: false, error: "Session not found" });
-    if (!(await getMemberRole(session.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(session.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -854,7 +885,7 @@ pmxRouter.delete("/inputs/:id", async (req: AuthenticatedRequest, res, next) => 
   try {
     const existing = await PmxInputModel.findOne({ _id: req.params.id });
     if (!existing) return res.status(404).json({ success: false, error: "Source not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -928,7 +959,7 @@ pmxRouter.put("/understanding", async (req: AuthenticatedRequest, res, next) => 
         { upsert: true }
       );
     } else {
-      if (!(await getMemberRole(projectId, req.userId!))) {
+      if (!canWrite(await getMemberRole(projectId, req.userId!))) {
         return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
       }
       understanding.version += 1;
@@ -1039,7 +1070,7 @@ pmxRouter.delete("/evidence/:id", async (req: AuthenticatedRequest, res, next) =
   try {
     const existing = await PmxEvidenceModel.findOne({ _id: req.params.id });
     if (!existing) return res.status(404).json({ success: false, error: "Evidence not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1288,7 +1319,7 @@ pmxRouter.delete("/problems/:id", async (req: AuthenticatedRequest, res, next) =
   try {
     const existing = await PmxProblemModel.findOne({ _id: req.params.id });
     if (!existing) return res.status(404).json({ success: false, error: "Problem not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1361,7 +1392,7 @@ pmxRouter.delete("/opportunities/:id", async (req: AuthenticatedRequest, res, ne
   try {
     const existing = await PmxOpportunityModel.findOne({ _id: req.params.id });
     if (!existing) return res.status(404).json({ success: false, error: "Opportunity not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1407,7 +1438,7 @@ pmxRouter.put("/decisions/:id/status", async (req: AuthenticatedRequest, res, ne
 
     const existing = await PmxDecisionModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!existing) return res.status(404).json({ success: false, error: "Recommendation not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1447,7 +1478,7 @@ pmxRouter.delete("/decisions/:id", async (req: AuthenticatedRequest, res, next) 
   try {
     const existing = await PmxDecisionModel.findOne({ _id: req.params.id });
     if (!existing) return res.status(404).json({ success: false, error: "Recommendation not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1485,7 +1516,7 @@ pmxRouter.get("/solutions/:id", async (req: AuthenticatedRequest, res, next) => 
   try {
     const solution = await PmxSolutionModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!solution) return res.status(404).json({ success: false, error: "Solution specification not found" });
-    if (!(await getMemberRole(solution.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(solution.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
     res.json({ success: true, data: solution });
@@ -1500,7 +1531,7 @@ pmxRouter.put("/solutions/:id", async (req: AuthenticatedRequest, res, next) => 
     const { prd, epic, userStories, techSpecs, apiContracts, databaseChanges, securityNotes, uxImprovements, edgeCases } = req.body;
     const solution = await PmxSolutionModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!solution) return res.status(404).json({ success: false, error: "Solution not found" });
-    if (!(await getMemberRole(solution.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(solution.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1534,7 +1565,7 @@ pmxRouter.post("/solutions/:id/refine", async (req: AuthenticatedRequest, res, n
 
     const solution = await PmxSolutionModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!solution) return res.status(404).json({ success: false, error: "Solution not found" });
-    if (!(await getMemberRole(solution.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(solution.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1570,7 +1601,7 @@ pmxRouter.post("/solutions/:id/rewind", async (req: AuthenticatedRequest, res, n
 
     const solution = await PmxSolutionModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!solution) return res.status(404).json({ success: false, error: "Solution not found" });
-    if (!(await getMemberRole(solution.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(solution.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1626,7 +1657,7 @@ pmxRouter.post("/solutions/combine", async (req: AuthenticatedRequest, res, next
     if (distinctProjectIds.length !== 1) {
       return res.status(400).json({ success: false, error: "Selected blueprints must belong to the same workspace" });
     }
-    if (!(await getMemberRole(distinctProjectIds[0], req.userId!))) {
+    if (!canWrite(await getMemberRole(distinctProjectIds[0], req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
     // Preserve the order the caller selected them in, not Mongo's return order.
@@ -1696,7 +1727,7 @@ pmxRouter.get("/tasks", requireWorkspaceAccess(), async (req: AuthenticatedReque
 // Create task manually
 pmxRouter.post("/tasks", requireWorkspaceAccess(), async (req: AuthenticatedRequest, res, next) => {
   try {
-    const { projectId = "default", title, description, type, sprintPlan = "Backlog", priority = "medium", timeEstimate = "1d", assignee, dependencies = [] } = req.body;
+    const { projectId = "default", title, description, type, department = "Engineering", milestone, sprintPlan = "Backlog", priority = "medium", timeEstimate = "1d", assignee, dependencies = [] } = req.body;
     if (!title || !description || !type) {
       return res.status(400).json({ success: false, error: "Title, Description, and Type are required" });
     }
@@ -1707,6 +1738,8 @@ pmxRouter.post("/tasks", requireWorkspaceAccess(), async (req: AuthenticatedRequ
       title,
       description,
       type,
+      department,
+      milestone,
       sprintPlan,
       priority,
       timeEstimate,
@@ -1724,10 +1757,10 @@ pmxRouter.post("/tasks", requireWorkspaceAccess(), async (req: AuthenticatedRequ
 // Update task details / status / Kanban columns
 pmxRouter.put("/tasks/:id", async (req: AuthenticatedRequest, res, next) => {
   try {
-    const { status, title, description, type, sprintPlan, priority, timeEstimate, assignee, dependencies } = req.body;
+    const { status, title, description, type, department, milestone, sprintPlan, priority, timeEstimate, assignee, dependencies } = req.body;
     const task = await PmxExecutionTaskModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!task) return res.status(404).json({ success: false, error: "Task ticket not found" });
-    if (!(await getMemberRole(task.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(task.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1735,7 +1768,7 @@ pmxRouter.put("/tasks/:id", async (req: AuthenticatedRequest, res, next) => {
     // Only touch fields the caller actually sent — a status-only PUT (the
     // Kanban Move/Back buttons) must not blank out title/description/type,
     // which are required and would otherwise fail validation on save.
-    const updates: Record<string, any> = { status, title, description, type, sprintPlan, priority, timeEstimate, assignee, dependencies };
+    const updates: Record<string, any> = { status, title, description, type, department, milestone, sprintPlan, priority, timeEstimate, assignee, dependencies };
     for (const [key, value] of Object.entries(updates)) {
       if (value !== undefined) (task as any)[key] = value;
     }
@@ -1784,7 +1817,7 @@ pmxRouter.post("/tasks/generate", async (req: AuthenticatedRequest, res, next) =
       logEntityType = "PmxSolution";
       logEntityId = solution._id.toString();
     }
-    if (!(await getMemberRole(projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1815,12 +1848,501 @@ pmxRouter.post("/tasks/generate", async (req: AuthenticatedRequest, res, next) =
   }
 });
 
+// ==========================================
+// 9B. EXECUTION PLAN GENERATION
+// ==========================================
+// Builds a full department-aware, milestone-grouped sprint backlog from a
+// PRD in one action — what PmxPrd.tsx's "Create Execution"/"Regenerate
+// Execution" buttons call. Distinct from the flat /tasks/generate above
+// (single call, no departments/milestones/sprints), which stays in place
+// unused/legacy rather than being removed.
+
+async function resolveExecutionSource(solutionId?: string, ideaPrdId?: string) {
+  if (ideaPrdId) {
+    const doc = await PmxIdeaPrdModel.findOne({ _id: ideaPrdId, isDeleted: false });
+    if (!doc) return null;
+    return {
+      projectId: doc.projectId,
+      title: doc.productName || "Development PRD",
+      prd: doc.markdown,
+      techSpecs: "",
+      sourceType: "ideaPrd" as const,
+      sourceId: doc._id.toString(),
+      sourcePrdVersion: doc.version,
+      logEntityType: "PmxIdeaPrd",
+      logEntityId: doc._id.toString(),
+    };
+  }
+  const solution = await PmxSolutionModel.findOne({ _id: solutionId, isDeleted: false });
+  if (!solution) return null;
+  return {
+    projectId: solution.projectId,
+    title: solution.title,
+    prd: solution.prd,
+    techSpecs: solution.techSpecs,
+    sourceType: "solution" as const,
+    sourceId: solution._id.toString(),
+    sourcePrdVersion: solution.version,
+    logEntityType: "PmxSolution",
+    logEntityId: solution._id.toString(),
+  };
+}
+
+// Shared by both /execution/generate (PRD-based) and /execution/generate-custom:
+// flattens each department's generated tasks into task documents, inserts
+// them, then resolves each task's dependency titles into real dependencyTaskIds
+// within the same generated batch (case-insensitive exact match — titles that
+// don't match a real task, e.g. a milestone-gate label, are left unresolved,
+// which is expected, not an error). `plan.milestones` must already be set
+// before calling this (used for milestoneOrder lookup).
+async function insertGeneratedTasksForPlan(
+  perDept: Array<{ department: string; tasks: any[] }>,
+  plan: any,
+  projectId: string,
+  userId: string,
+  extra: { solutionId?: string; ideaPrdId?: string }
+) {
+  const milestoneOrderByName = new Map(plan.milestones.map((m: any) => [m.name, m.order]));
+  const flatTasks = perDept.flatMap(({ department, tasks }) =>
+    tasks.map((t: any) => ({
+      projectId,
+      userId,
+      solutionId: extra.solutionId,
+      ideaPrdId: extra.ideaPrdId,
+      planId: (plan._id as any).toString(),
+      title: t.title,
+      description: t.description || "",
+      type: t.type || "other",
+      department,
+      milestone: t.milestone,
+      milestoneOrder: milestoneOrderByName.get(t.milestone),
+      sprintPlan: `Sprint ${t.sprintNumber || 1}`,
+      sprintNumber: t.sprintNumber,
+      priority: t.priority || "medium",
+      status: "todo",
+      timeEstimate: t.timeEstimate || "1d",
+      assignee: t.assignee || "",
+      dueWeek: t.dueWeek,
+      dueDate: t.dueWeek ? new Date(plan.startDate.getTime() + (t.dueWeek - 1) * 7 * 24 * 60 * 60 * 1000) : undefined,
+      prdSectionLink: t.prdSectionLink,
+      acceptanceCriteria: t.acceptanceCriteria || [],
+      implementationNotes: t.implementationNotes,
+      dependencies: t.dependencies || [],
+      dependencyTaskIds: [] as string[],
+      isDeleted: false,
+    }))
+  );
+
+  if (flatTasks.length === 0) return [];
+
+  const inserted = await PmxExecutionTaskModel.insertMany(flatTasks);
+
+  const idByTitle = new Map(inserted.map((doc) => [doc.title.trim().toLowerCase(), (doc._id as any).toString()]));
+  await Promise.all(
+    inserted.map(async (doc) => {
+      const ids = doc.dependencies
+        .map((depTitle: string) => idByTitle.get(depTitle.trim().toLowerCase()))
+        .filter((id: string | undefined): id is string => !!id && id !== (doc._id as any).toString());
+      if (ids.length) {
+        doc.dependencyTaskIds = ids;
+        await doc.save();
+      }
+    })
+  );
+
+  return inserted;
+}
+
+const DEPARTMENT_ARTIFACT_MENU: Record<string, Array<{ type: string; title: string }>> = {
+  Engineering: [
+    { type: "architecture_summary", title: "Architecture Summary" },
+    { type: "api_contract", title: "API Contract" },
+    { type: "database_schema", title: "Database Schema" },
+  ],
+  Design: [
+    { type: "ui_specification", title: "UI Specification" },
+    { type: "component_inventory", title: "Component Inventory" },
+  ],
+  QA: [
+    { type: "test_plan", title: "Test Plan" },
+    { type: "release_checklist", title: "Release Checklist" },
+  ],
+  Marketing: [
+    { type: "launch_plan", title: "Launch Plan" },
+    { type: "newsletter_draft", title: "Newsletter Draft" },
+  ],
+  Support: [
+    { type: "faq", title: "FAQ" },
+    { type: "help_center_outline", title: "Help Center Outline" },
+  ],
+};
+
+// Background job — deliberately not awaited by its callers (POST
+// /execution/generate and /execution/regenerate) so the HTTP response
+// returns as soon as the board itself is populated; artifacts trickle onto
+// /pmx/artifacts over the following minute or so (see PmxArtifacts.tsx's
+// progress indicator, sourced from plan.artifactJobs/artifactsStatus).
+// Every mutation is an atomic updateOne against the plan doc — never a
+// read-modify-save of the whole document — so concurrent worker completions
+// can't race each other.
+async function generateArtifactsForPlan(planId: string, projectId: string, departments: string[], prd: string, userId: string) {
+  const jobs = departments.flatMap((department) =>
+    (DEPARTMENT_ARTIFACT_MENU[department] || []).map((item) => ({ ...item, department, status: "pending" as const }))
+  );
+  if (jobs.length === 0) return;
+
+  await PmxExecutionPlanModel.updateOne(
+    { _id: planId },
+    { $push: { artifactJobs: { $each: jobs } }, $set: { artifactsStatus: "generating" } }
+  );
+
+  const CONCURRENCY = 3;
+  let anyFailed = false;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < jobs.length) {
+      const job = jobs[cursor++];
+      try {
+        const content = await compileArtifact(job.type, job.title, prd, undefined, userId, projectId);
+        await PmxArtifactModel.create({
+          projectId, userId, title: job.title, type: job.type as any,
+          department: job.department, planId, content, format: "markdown",
+        });
+        await PmxExecutionPlanModel.updateOne(
+          { _id: planId, artifactJobs: { $elemMatch: { type: job.type, department: job.department } } },
+          { $set: { "artifactJobs.$.status": "done" } }
+        );
+      } catch (err) {
+        anyFailed = true;
+        console.error(`[Execution Artifacts] ${job.department}/${job.type} failed:`, err);
+        await PmxExecutionPlanModel.updateOne(
+          { _id: planId, artifactJobs: { $elemMatch: { type: job.type, department: job.department } } },
+          { $set: { "artifactJobs.$.status": "failed" } }
+        );
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, () => worker()));
+  await PmxExecutionPlanModel.updateOne({ _id: planId }, { $set: { artifactsStatus: anyFailed ? "partial_failed" : "completed" } });
+}
+
+// Generate a full execution plan from a PRD — department detection,
+// milestones, sprints, and per-department tasks. Not wrapped in
+// requireWorkspaceAccess() since projectId isn't known until after the
+// solution/ideaPrd lookup below (same reason /tasks/generate above doesn't
+// use it either) — access is checked manually once projectId is resolved.
+pmxRouter.post("/execution/generate", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const src = await resolveExecutionSource(req.body.solutionId, req.body.ideaPrdId);
+    if (!src) return res.status(404).json({ success: false, error: "PRD not found" });
+    if (!canWrite(await getMemberRole(src.projectId, req.userId!))) {
+      return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
+    }
+
+    const plan = await PmxExecutionPlanModel.create({
+      projectId: src.projectId,
+      userId: req.userId,
+      type: "prd",
+      sourceType: src.sourceType,
+      sourceId: src.sourceId,
+      sourcePrdVersion: src.sourcePrdVersion,
+      name: src.title,
+      startDate: new Date(),
+      status: "generating",
+    });
+
+    const scaffold = await generateExecutionScaffold(src.prd, src.techSpecs, undefined, req.userId, src.projectId);
+
+    const perDept = await Promise.all(
+      scaffold.departments.map((department) =>
+        generateDepartmentTasks(department, src.prd, src.techSpecs, scaffold.milestones, scaffold.sprints, scaffold.scopeSummary, undefined, req.userId, src.projectId)
+          .then((tasks) => ({ department, tasks }))
+          .catch((err) => {
+            console.error(`[Execution Generate] ${department} task generation failed:`, err);
+            return { department, tasks: [] as any[] };
+          })
+      )
+    );
+
+    plan.departments = scaffold.departments;
+    plan.milestones = scaffold.milestones;
+    plan.sprints = scaffold.sprints;
+
+    const inserted = await insertGeneratedTasksForPlan(perDept, plan, src.projectId, req.userId!, {
+      solutionId: src.sourceType === "solution" ? src.sourceId : undefined,
+      ideaPrdId: src.sourceType === "ideaPrd" ? src.sourceId : undefined,
+    });
+
+    if (inserted.length === 0) {
+      plan.status = "failed";
+      await plan.save();
+      return res.status(500).json({ success: false, error: "Couldn't generate any tasks from this PRD — try again." });
+    }
+
+    plan.status = "completed";
+    await plan.save();
+
+    await logAudit(req, src.projectId, "execution_generated", `Generated execution plan from "${src.title}": ${inserted.length} tasks across ${scaffold.departments.length} department(s)`, src.logEntityType, src.logEntityId);
+
+    res.json({ success: true, data: { plan, tasks: inserted } });
+
+    generateArtifactsForPlan((plan._id as any).toString(), src.projectId, scaffold.departments, src.prd, req.userId!)
+      .catch((err) => console.error("[Execution Generate] artifact generation failed:", err));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Generate a focused execution plan with no PRD — the user picks a name,
+// goal, optional description, and exactly which departments/workstreams are
+// involved. Unlike /execution/generate, projectId is known directly from
+// the request body (no solution/ideaPrd lookup needed first), so the
+// standard requireWorkspaceAccess() middleware applies directly.
+pmxRouter.post("/execution/generate-custom", requireWorkspaceAccess(), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.body.projectId as string;
+    const name = (req.body.name as string || "").trim();
+    const goal = (req.body.goal as string || "").trim();
+    const description = (req.body.description as string || "").trim();
+    const departments = Array.isArray(req.body.departments) ? (req.body.departments as string[]) : [];
+
+    if (!name) return res.status(400).json({ success: false, error: "An execution name is required" });
+    if (!goal) return res.status(400).json({ success: false, error: "A goal is required" });
+    const validDepartments = departments.filter((d) => (PMX_DEPARTMENTS as readonly string[]).includes(d));
+    if (validDepartments.length === 0) {
+      return res.status(400).json({ success: false, error: "Select at least one workstream" });
+    }
+
+    const plan = await PmxExecutionPlanModel.create({
+      projectId,
+      userId: req.userId,
+      type: "custom",
+      name,
+      goal,
+      description: description || undefined,
+      startDate: new Date(),
+      status: "generating",
+    });
+
+    const scaffold = await generateCustomExecutionScaffold(name, goal, description, validDepartments, undefined, req.userId, projectId);
+
+    const contextText = `Execution: ${name}\nGoal: ${goal}${description ? `\nContext: ${description}` : ""}`;
+    const perDept = await Promise.all(
+      validDepartments.map((department) =>
+        generateDepartmentTasks(department, contextText, "", scaffold.milestones, scaffold.sprints, scaffold.scopeSummary, undefined, req.userId, projectId)
+          .then((tasks) => ({ department, tasks }))
+          .catch((err) => {
+            console.error(`[Execution Generate Custom] ${department} task generation failed:`, err);
+            return { department, tasks: [] as any[] };
+          })
+      )
+    );
+
+    plan.departments = validDepartments;
+    plan.milestones = scaffold.milestones;
+    plan.sprints = scaffold.sprints;
+
+    const inserted = await insertGeneratedTasksForPlan(perDept, plan, projectId, req.userId!, {});
+
+    if (inserted.length === 0) {
+      plan.status = "failed";
+      await plan.save();
+      return res.status(500).json({ success: false, error: "Couldn't generate any tasks for this execution — try again." });
+    }
+
+    plan.status = "completed";
+    await plan.save();
+
+    await logAudit(req, projectId, "execution_generated", `Generated custom execution "${name}": ${inserted.length} tasks across ${validDepartments.length} workstream(s)`, "PmxExecutionPlan", (plan._id as any).toString());
+
+    res.json({ success: true, data: { plan, tasks: inserted } });
+
+    generateArtifactsForPlan((plan._id as any).toString(), projectId, validDepartments, contextText, req.userId!)
+      .catch((err) => console.error("[Execution Generate Custom] artifact generation failed:", err));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Reconcile the execution plan against an updated PRD: preserve completed
+// tasks, update/remove/add the rest, and record a diff summary for the
+// frontend's banner. Same reason as /execution/generate for skipping
+// requireWorkspaceAccess() — projectId isn't known until after resolution.
+pmxRouter.post("/execution/regenerate", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const src = await resolveExecutionSource(req.body.solutionId, req.body.ideaPrdId);
+    if (!src) return res.status(404).json({ success: false, error: "PRD not found" });
+    if (!canWrite(await getMemberRole(src.projectId, req.userId!))) {
+      return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
+    }
+
+    // type: "prd" — a custom-execution plan has no PRD to diff against, so
+    // regenerate must never accidentally target one.
+    const plan = await PmxExecutionPlanModel.findOne({ projectId: src.projectId, type: "prd", isDeleted: false }).sort({ createdAt: -1 });
+    if (!plan) return res.status(404).json({ success: false, error: "No PRD-based execution plan exists yet for this workspace — use Create Execution first." });
+
+    const existingTasks = await PmxExecutionTaskModel.find({ projectId: src.projectId, isDeleted: false });
+    const existingTasksJson = JSON.stringify(
+      existingTasks.map((t) => ({
+        _id: (t._id as any).toString(),
+        title: t.title,
+        description: t.description,
+        department: t.department,
+        status: t.status,
+        milestone: t.milestone,
+        sprintNumber: t.sprintNumber,
+        priority: t.priority,
+      })),
+      null,
+      2
+    );
+
+    const diffResult = await generateExecutionDiff(
+      src.prd,
+      src.techSpecs,
+      plan.departments,
+      plan.milestones.map((m) => ({ name: m.name, goal: m.goal })),
+      plan.sprints,
+      existingTasksJson,
+      undefined,
+      req.userId,
+      src.projectId
+    );
+
+    const doneIds = new Set(existingTasks.filter((t) => t.status === "done").map((t) => (t._id as any).toString()));
+    const existingById = new Map(existingTasks.map((t) => [(t._id as any).toString(), t]));
+    const priorDepartments = new Set(plan.departments);
+
+    plan.history.push({
+      version: plan.version,
+      departments: plan.departments,
+      milestones: plan.milestones,
+      sprints: plan.sprints,
+      changedAt: new Date(),
+    });
+    plan.version += 1;
+    if (diffResult.departments?.length) plan.departments = diffResult.departments;
+    if (diffResult.milestones?.length) plan.milestones = diffResult.milestones;
+    if (diffResult.sprints?.length) plan.sprints = diffResult.sprints;
+
+    const milestoneOrderByName = new Map(plan.milestones.map((m) => [m.name, m.order]));
+
+    let addedCount = 0;
+    if (diffResult.diff.add?.length) {
+      const newDocs = diffResult.diff.add.map((t: any) => ({
+        projectId: src.projectId,
+        userId: req.userId,
+        solutionId: src.sourceType === "solution" ? src.sourceId : undefined,
+        ideaPrdId: src.sourceType === "ideaPrd" ? src.sourceId : undefined,
+        planId: (plan._id as any).toString(),
+        title: t.title,
+        description: t.description || "",
+        type: t.type || "other",
+        department: t.department || "Engineering",
+        milestone: t.milestone,
+        milestoneOrder: milestoneOrderByName.get(t.milestone),
+        sprintPlan: `Sprint ${t.sprintNumber || 1}`,
+        sprintNumber: t.sprintNumber,
+        priority: t.priority || "medium",
+        status: "todo",
+        timeEstimate: t.timeEstimate || "1d",
+        assignee: t.assignee || "",
+        dueWeek: t.dueWeek,
+        dueDate: t.dueWeek ? new Date(plan.startDate.getTime() + (t.dueWeek - 1) * 7 * 24 * 60 * 60 * 1000) : undefined,
+        prdSectionLink: t.prdSectionLink,
+        acceptanceCriteria: t.acceptanceCriteria || [],
+        implementationNotes: t.implementationNotes,
+        dependencies: t.dependencies || [],
+        dependencyTaskIds: [] as string[],
+        diffStatus: "added" as const,
+        isDeleted: false,
+      }));
+      const inserted = await PmxExecutionTaskModel.insertMany(newDocs);
+      addedCount = inserted.length;
+    }
+
+    let updatedCount = 0;
+    for (const upd of diffResult.diff.update || []) {
+      if (!upd.matchId || doneIds.has(upd.matchId)) continue;
+      const task = existingById.get(upd.matchId);
+      if (!task) continue;
+      for (const [key, value] of Object.entries(upd.changes || {})) {
+        if (value === undefined) continue;
+        (task as any)[key] = value;
+      }
+      task.diffStatus = "updated";
+      task.diffSummary = upd.reason || "Updated by PRD regeneration.";
+      await task.save();
+      updatedCount++;
+    }
+
+    const removeIds = (diffResult.diff.remove || []).filter((id: string) => !doneIds.has(id));
+    let removedCount = 0;
+    if (removeIds.length) {
+      const result = await PmxExecutionTaskModel.updateMany(
+        { _id: { $in: removeIds }, projectId: src.projectId },
+        { isDeleted: true }
+      );
+      removedCount = result.modifiedCount || removeIds.length;
+    }
+
+    plan.sourcePrdVersion = src.sourcePrdVersion;
+    plan.status = "completed";
+    await plan.save();
+
+    await logAudit(
+      req,
+      src.projectId,
+      "execution_regenerated",
+      `Regenerated execution plan from "${src.title}": +${addedCount} added / ~${updatedCount} updated / -${removedCount} removed`,
+      src.logEntityType,
+      src.logEntityId
+    );
+
+    const tasks = await PmxExecutionTaskModel.find({ projectId: src.projectId, isDeleted: false });
+    res.json({ success: true, data: { plan, tasks, diff: { added: addedCount, updated: updatedCount, removed: removedCount } } });
+
+    const newDepartments = plan.departments.filter((d) => !priorDepartments.has(d));
+    if (newDepartments.length) {
+      generateArtifactsForPlan((plan._id as any).toString(), src.projectId, newDepartments, src.prd, req.userId!)
+        .catch((err) => console.error("[Execution Regenerate] artifact generation failed:", err));
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Latest execution plan for a workspace — metrics bar, Sprint Health inputs,
+// and the "PRD changed since last generation" staleness check (frontend
+// compares plan.sourcePrdVersion to the live PmxSolution/PmxIdeaPrd .version).
+pmxRouter.get("/execution/plan", requireWorkspaceAccess(), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = (req.query.projectId as string) || "default";
+    const plan = await PmxExecutionPlanModel.findOne({ projectId, isDeleted: false }).sort({ createdAt: -1 });
+    res.json({ success: true, data: plan });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Clears the diff highlight once the user acknowledges a regenerate's
+// added/updated/removed summary banner.
+pmxRouter.post("/execution/dismiss-diff", requireWorkspaceAccess(), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = (req.body.projectId as string) || "default";
+    await PmxExecutionTaskModel.updateMany({ projectId, isDeleted: false }, { $unset: { diffStatus: "", diffSummary: "" } });
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Delete task
 pmxRouter.delete("/tasks/:id", async (req: AuthenticatedRequest, res, next) => {
   try {
     const existing = await PmxExecutionTaskModel.findOne({ _id: req.params.id });
     if (!existing) return res.status(404).json({ success: false, error: "Task not found" });
-    if (!(await getMemberRole(existing.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(existing.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -1932,7 +2454,7 @@ pmxRouter.get("/artifacts/:id", async (req: AuthenticatedRequest, res, next) => 
   try {
     const doc = await PmxArtifactModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!doc) return res.status(404).json({ success: false, error: "Artifact not found" });
-    if (!(await getMemberRole(doc.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(doc.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
     res.json({ success: true, data: doc });
@@ -2034,6 +2556,86 @@ pmxRouter.get("/usage", async (req: AuthenticatedRequest, res, next) => {
         byModel,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ==========================================
+// 11B. USAGE & PLAN (workspace trial + per-user token allowance)
+// ==========================================
+
+// Everything the Usage & Plan settings page needs in one call. `members`
+// (per-member usage) is only populated for owner/admin — a plain member
+// gets it omitted, enforced here server-side, not just hidden client-side.
+pmxRouter.get("/billing/summary", requireWorkspaceAccess(), async (req: WorkspaceScopedRequest, res, next) => {
+  try {
+    const projectId = (req.query.projectId as string) || (req.body?.projectId as string);
+    const planStatus = await getWorkspacePlanStatus(projectId);
+    const currentUser = await getUserUsage(req.userId!, projectId);
+
+    const memberRows = await PmxWorkspaceMemberModel.find({ projectId }).sort({ joinedAt: 1 });
+    const memberCount = memberRows.length;
+
+    let members: Awaited<ReturnType<typeof getWorkspaceMemberUsage>> | undefined;
+    if (req.workspaceRole === "owner" || req.workspaceRole === "admin") {
+      const users = await UserModel.find(
+        { clerkId: { $in: memberRows.map((m) => m.userId) } },
+        { clerkId: 1, email: 1, username: 1, firstName: 1, lastName: 1 }
+      );
+      const userByClerkId = new Map(users.map((u) => [u.clerkId, u]));
+      const enriched = memberRows.map((m) => {
+        const u = userByClerkId.get(m.userId);
+        return {
+          userId: m.userId,
+          role: m.role,
+          name: (u ? [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username : "") || "Unknown user",
+        };
+      });
+      members = await getWorkspaceMemberUsage(projectId, enriched);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        plan: planStatus?.plan ?? "trial",
+        trial: planStatus
+          ? {
+              startedAt: planStatus.trialStartedAt,
+              endsAt: planStatus.trialEndsAt,
+              daysRemaining: planStatus.daysRemaining,
+              status: planStatus.status,
+            }
+          : null,
+        memberCount,
+        currentUser,
+        limit: USER_TOKEN_LIMIT,
+        upgradeRequestedAt: planStatus?.upgradeRequestedAt ?? null,
+        members,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Honest upgrade placeholder — no billing/payment infrastructure exists to
+// connect to yet, and the UI must never claim a fake upgrade succeeded. This
+// records real, server-persisted intent (owner/admin only) that a future
+// real billing integration can act on; it never changes `plan` itself.
+pmxRouter.post("/billing/upgrade-request", requireWorkspaceAccess("admin"), async (req: WorkspaceScopedRequest, res, next) => {
+  try {
+    const projectId = (req.body?.projectId as string) || (req.query.projectId as string);
+    const doc = await PmxUnderstandingModel.findOne({ projectId, isDeleted: false });
+    if (!doc) return res.status(404).json({ success: false, error: "Workspace not found" });
+
+    if (!doc.upgradeRequestedAt) {
+      doc.upgradeRequestedAt = new Date();
+      await doc.save();
+      await logAudit(req, projectId, "workspace_upgrade_requested", "Requested a workspace upgrade", "PmxUnderstanding", doc._id.toString());
+    }
+
+    res.json({ success: true, data: { upgradeRequestedAt: doc.upgradeRequestedAt } });
   } catch (err) {
     next(err);
   }
@@ -2285,7 +2887,7 @@ pmxRouter.post("/idea/generate", async (req: AuthenticatedRequest, res, next) =>
   try {
     doc = await PmxIdeaPrdModel.create({ projectId, userId: req.userId, idea, status: "generating" });
 
-    const result = await generateIdeaPrd(idea);
+    const result = await generateIdeaPrd(idea, req.userId, projectId);
 
     doc.status = "completed";
     doc.markdown = result.markdown;
@@ -2340,7 +2942,7 @@ pmxRouter.get("/idea/prd/:id", async (req: AuthenticatedRequest, res, next) => {
   try {
     const doc = await PmxIdeaPrdModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!doc) return res.status(404).json({ success: false, error: "PRD not found" });
-    if (!(await getMemberRole(doc.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(doc.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
     res.json({ success: true, data: doc });
@@ -2361,14 +2963,14 @@ pmxRouter.post("/idea/prd/:id/refine", async (req: AuthenticatedRequest, res, ne
 
     const doc = await PmxIdeaPrdModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!doc) return res.status(404).json({ success: false, error: "PRD not found" });
-    if (!(await getMemberRole(doc.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(doc.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
     if (doc.status !== "completed") {
       return res.status(409).json({ success: false, error: "This PRD isn't ready to edit yet" });
     }
 
-    const result = await refineIdeaPrd(doc.markdown, doc.stack, instruction);
+    const result = await refineIdeaPrd(doc.markdown, doc.stack, instruction, req.userId, doc.projectId);
 
     // Snapshot the pre-edit state so it can be restored later.
     doc.versions.push({ version: doc.version, markdown: doc.markdown, stack: doc.stack, createdAt: new Date() });
@@ -2400,7 +3002,7 @@ pmxRouter.post("/idea/prd/:id/rewind", async (req: AuthenticatedRequest, res, ne
     const targetVersion = Number(version);
     const doc = await PmxIdeaPrdModel.findOne({ _id: req.params.id, isDeleted: false });
     if (!doc) return res.status(404).json({ success: false, error: "PRD not found" });
-    if (!(await getMemberRole(doc.projectId, req.userId!))) {
+    if (!canWrite(await getMemberRole(doc.projectId, req.userId!))) {
       return res.status(403).json({ success: false, error: "You do not have access to this workspace." });
     }
 
@@ -2481,8 +3083,9 @@ pmxRouter.patch("/projects/:projectId/members/:memberId", requireWorkspaceAccess
     const projectId = req.params.projectId as string;
     const memberId = req.params.memberId as string;
     const { role } = req.body;
-    if (role !== "admin" && role !== "member") {
-      return res.status(400).json({ success: false, error: "Role must be 'admin' or 'member'." });
+    const assignableRoles: string[] = [...PMX_INVITE_ROLES];
+    if (!assignableRoles.includes(role)) {
+      return res.status(400).json({ success: false, error: `Role must be one of: ${assignableRoles.join(", ")}` });
     }
 
     const target = await PmxWorkspaceMemberModel.findOne({ _id: memberId, projectId });
@@ -2532,12 +3135,103 @@ pmxRouter.delete("/projects/:projectId/members/:memberId", requireWorkspaceAcces
 // ==========================================
 // 15B. WORKSPACE INVITE CODES (current invite mechanism)
 // ==========================================
+// Multiple simultaneous, independently revocable, role-specific codes per
+// workspace — an "Engineering Invite", a "Marketing Invite", a "Viewer
+// Invite" can all be live at once. Supersedes the old single-active-code
+// model (/invite-codes/generate|revoke|current below are no longer called
+// by the frontend but are left in place, unused — same zero-risk-legacy
+// convention as /tasks/generate elsewhere in this file).
 
-// Generate a new invite code for a workspace, revoking whatever code was
-// previously active — one active code per workspace, same "standing,
-// regenerable" model the legacy invite link used. Only this response (and
-// the identical one from /revoke's replacement, if it ever mints a new one)
-// ever carries the plaintext code; it is never stored or returned again.
+// List every non-revoked code for a workspace — label, role, usage/expiry
+// metadata. Never the plaintext code or its hash.
+pmxRouter.get("/projects/:projectId/invite-codes", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const codes = await PmxWorkspaceInviteCodeModel.find({ projectId, revoked: false }).sort({ createdAt: -1 });
+    res.json({
+      success: true,
+      data: codes.map((c) => ({
+        _id: c._id.toString(),
+        label: c.label || "",
+        role: c.role,
+        createdAt: c.createdAt,
+        expiresAt: c.expiresAt,
+        maxUses: c.maxUses,
+        usageCount: c.usageCount,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Create an additional invite code for a workspace — does not touch any
+// existing codes. Only this response ever carries the plaintext code; it is
+// never stored or returned again.
+pmxRouter.post("/projects/:projectId/invite-codes", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const { role, label, expiresAt, maxUses } = req.body as { role?: string; label?: string; expiresAt?: string; maxUses?: number };
+    if (!role || !(PMX_INVITE_ROLES as readonly string[]).includes(role)) {
+      return res.status(400).json({ success: false, error: `Role must be one of: ${PMX_INVITE_ROLES.join(", ")}` });
+    }
+
+    let plaintext = "";
+    let created;
+    for (let attempt = 0; attempt < 3 && !created; attempt++) {
+      plaintext = generateInviteCodePlaintext();
+      try {
+        created = await PmxWorkspaceInviteCodeModel.create({
+          projectId,
+          codeHash: hashInviteCode(plaintext),
+          role: role as typeof PMX_INVITE_ROLES[number],
+          label: label?.trim() || undefined,
+          createdBy: req.userId,
+          expiresAt: expiresAt ? new Date(expiresAt) : null,
+          maxUses: typeof maxUses === "number" && maxUses > 0 ? maxUses : null,
+        });
+      } catch (err: any) {
+        // Duplicate codeHash — astronomically unlikely (30^8 combinations),
+        // but retry with a freshly generated code rather than fail outright.
+        if (err?.code !== 11000) throw err;
+      }
+    }
+    if (!created) return res.status(500).json({ success: false, error: "Couldn't generate a unique invite code. Try again." });
+
+    await logAudit(req, projectId, "invite_code_generated", `Generated a new "${PMX_ROLE_LABELS[role as PmxWorkspaceRole]}" invite code${label ? ` ("${label}")` : ""}`, "PmxWorkspaceInviteCode", created._id.toString());
+    res.json({
+      success: true,
+      data: {
+        _id: created._id.toString(),
+        code: plaintext,
+        label: created.label || "",
+        role: created.role,
+        createdAt: created.createdAt,
+        maxUses: created.maxUses,
+        expiresAt: created.expiresAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Revoke one specific code by id.
+pmxRouter.post("/projects/:projectId/invite-codes/:codeId/revoke", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const codeId = req.params.codeId as string;
+    const result = await PmxWorkspaceInviteCodeModel.updateOne({ _id: codeId, projectId, revoked: false }, { revoked: true, revokedAt: new Date() });
+    if (result.modifiedCount > 0) {
+      await logAudit(req, projectId, "invite_code_revoked", "Revoked a workspace invite code", "PmxWorkspaceInviteCode", codeId);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── Legacy single-code routes (no longer called by the frontend) ──────────
 pmxRouter.post("/projects/:projectId/invite-codes/generate", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const projectId = req.params.projectId as string;
@@ -2551,12 +3245,10 @@ pmxRouter.post("/projects/:projectId/invite-codes/generate", requireWorkspaceAcc
         created = await PmxWorkspaceInviteCodeModel.create({
           projectId,
           codeHash: hashInviteCode(plaintext),
-          role: "member",
+          role: "viewer",
           createdBy: req.userId,
         });
       } catch (err: any) {
-        // Duplicate codeHash — astronomically unlikely (30^8 combinations),
-        // but retry with a freshly generated code rather than fail outright.
         if (err?.code !== 11000) throw err;
       }
     }
@@ -2572,8 +3264,6 @@ pmxRouter.post("/projects/:projectId/invite-codes/generate", requireWorkspaceAcc
   }
 });
 
-// Revoke the active code without replacing it — after this, the workspace
-// has no usable invite code until an admin/owner generates a new one.
 pmxRouter.post("/projects/:projectId/invite-codes/revoke", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const projectId = req.params.projectId as string;
@@ -2587,8 +3277,6 @@ pmxRouter.post("/projects/:projectId/invite-codes/revoke", requireWorkspaceAcces
   }
 });
 
-// Metadata only, for the Settings page's persistent view — never the
-// plaintext code or its hash.
 pmxRouter.get("/projects/:projectId/invite-codes/current", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
   try {
     const projectId = req.params.projectId as string;
@@ -2651,8 +3339,32 @@ const INVITE_CODE_ERROR_MESSAGE: Record<string, string> = {
   limit_reached: "This invite code is no longer available.",
 };
 
+// Failed-attempt visibility (security requirement): a code that resolves to
+// a real, known workspace but fails validation gets logged against that
+// workspace's own audit trail so an owner/admin can see join attempts
+// against their revoked/expired/exhausted codes. "invalid" has no
+// projectId to log against (the code doesn't match anything real), so it's
+// a server-side warning only — still visible in logs, just not per-workspace.
+async function logFailedInviteAttempt(req: AuthenticatedRequest, result: Awaited<ReturnType<typeof checkInviteCode>>) {
+  if (result.status === "invalid") {
+    console.warn(`[Invite Code] Invalid code attempt by user ${req.userId}`);
+    return;
+  }
+  if (result.status === "already_member") return;
+  await logAudit(req, result.code.projectId, "invite_join_failed", `A join attempt failed (${result.status})`, "PmxWorkspaceInviteCode", result.code._id.toString());
+}
+
+async function buildWorkspacePreview(workspace: any) {
+  const workspaceName = workspace.workspaceName || workspace.productSummary?.name || "Workspace";
+  const [memberCount, sourceCount] = await Promise.all([
+    PmxWorkspaceMemberModel.countDocuments({ projectId: workspace.projectId }),
+    PmxInputModel.countDocuments({ projectId: workspace.projectId, isDeleted: false }),
+  ]);
+  return { workspaceName, memberCount, sourceCount };
+}
+
 // Resolve a code without consuming it — powers the confirm-before-join
-// screen. Any authenticated user (never a workspace member yet, by
+// preview screen. Any authenticated user (never a workspace member yet, by
 // definition), rate-limited against brute-force guessing.
 pmxRouter.post("/invite-codes/resolve", inviteCodeLimiter, async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -2662,14 +3374,25 @@ pmxRouter.post("/invite-codes/resolve", inviteCodeLimiter, async (req: Authentic
       case "expired":
       case "revoked":
       case "limit_reached":
+        await logFailedInviteAttempt(req, result);
         return res.json({ success: true, data: { status: result.status, message: INVITE_CODE_ERROR_MESSAGE[result.status] } });
       case "already_member": {
-        const workspaceName = result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace";
+        const { workspaceName } = await buildWorkspacePreview(result.workspace);
         return res.json({ success: true, data: { status: "already_member", projectId: result.code.projectId, workspaceName } });
       }
       case "valid": {
-        const workspaceName = result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace";
-        return res.json({ success: true, data: { status: "valid", workspaceName } });
+        const { workspaceName, memberCount, sourceCount } = await buildWorkspacePreview(result.workspace);
+        return res.json({
+          success: true,
+          data: {
+            status: "valid",
+            workspaceName,
+            memberCount,
+            sourceCount,
+            role: result.code.role,
+            roleLabel: PMX_ROLE_LABELS[result.code.role as PmxWorkspaceRole],
+          },
+        });
       }
     }
   } catch (err) {
@@ -2678,7 +3401,7 @@ pmxRouter.post("/invite-codes/resolve", inviteCodeLimiter, async (req: Authentic
 });
 
 // Actually join — re-validates from scratch, then atomically grants
-// membership. Always "member", never anything higher.
+// membership at the role the redeemed code was created with.
 pmxRouter.post("/invite-codes/accept", inviteCodeLimiter, async (req: AuthenticatedRequest, res, next) => {
   try {
     const result = await checkInviteCode(req.body?.code, req.userId!);
@@ -2687,23 +3410,24 @@ pmxRouter.post("/invite-codes/accept", inviteCodeLimiter, async (req: Authentica
       case "expired":
       case "revoked":
       case "limit_reached":
+        await logFailedInviteAttempt(req, result);
         return res.status(400).json({ success: false, error: INVITE_CODE_ERROR_MESSAGE[result.status] });
       case "already_member": {
-        const workspaceName = result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace";
+        const { workspaceName } = await buildWorkspacePreview(result.workspace);
         return res.json({ success: true, data: { alreadyMember: true, projectId: result.code.projectId, workspaceName } });
       }
       case "valid": {
-        const workspaceName = result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace";
+        const { workspaceName } = await buildWorkspacePreview(result.workspace);
 
         await PmxWorkspaceMemberModel.findOneAndUpdate(
           { projectId: result.code.projectId, userId: req.userId },
-          { $setOnInsert: { projectId: result.code.projectId, userId: req.userId, role: "member", invitedBy: result.code.createdBy, joinedAt: new Date() } },
+          { $setOnInsert: { projectId: result.code.projectId, userId: req.userId, role: result.code.role, invitedBy: result.code.createdBy, joinedAt: new Date() } },
           { upsert: true }
         );
         await PmxWorkspaceInviteCodeModel.updateOne({ _id: result.code._id }, { $inc: { usageCount: 1 } });
 
-        await logAudit(req, result.code.projectId, "member_joined", "A new member joined the workspace via invite code", "PmxWorkspaceMember", req.userId);
-        return res.json({ success: true, data: { projectId: result.code.projectId, workspaceName } });
+        await logAudit(req, result.code.projectId, "member_joined", `A new member joined the workspace as "${PMX_ROLE_LABELS[result.code.role as PmxWorkspaceRole]}" via invite code`, "PmxWorkspaceMember", req.userId);
+        return res.json({ success: true, data: { projectId: result.code.projectId, workspaceName, role: result.code.role } });
       }
     }
   } catch (err) {
@@ -2738,13 +3462,352 @@ pmxRouter.post("/invite/:token/accept", async (req: AuthenticatedRequest, res, n
   }
 });
 
+// ==========================================
+// 15C. EMAIL INVITES
+// ==========================================
+// The second, complementary way to add people (alongside the anonymous,
+// shareable invite codes above): bound to one specific email address, so
+// only that identity can accept it. Public preview before sign-in lives at
+// GET /api/pmx-invite-email/:token (api/routes/pmxEmailInvite.ts, mirrors
+// pmxInvite.ts's role for the legacy token link) — everything below is
+// authenticated (pmxRouter.use(authMiddleware) above).
+
+function generateEmailInviteToken(): string {
+  return crypto.randomBytes(24).toString("base64url");
+}
+
+async function displayNameForClerkId(clerkId: string): Promise<string> {
+  const u = await UserModel.findOne({ clerkId });
+  if (!u) return "A workspace admin";
+  return [u.firstName, u.lastName].filter(Boolean).join(" ") || u.username || u.email;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Invite one or more emails at once — per-email results so the UI can show
+// a clear batch summary ("3 sent, 1 already a member, 1 already pending").
+// Creating the invitation row never fails because the email itself failed
+// to send (SMTP down/unconfigured) — same reasoning as the rest of this
+// codebase's best-effort email sends; the UI falls back to "copy this link".
+pmxRouter.post("/projects/:projectId/invites/email", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const { emails, role } = req.body as { emails?: string[]; role?: string };
+    if (!Array.isArray(emails) || emails.length === 0) {
+      return res.status(400).json({ success: false, error: "At least one email address is required" });
+    }
+    if (!role || !(PMX_INVITE_ROLES as readonly string[]).includes(role)) {
+      return res.status(400).json({ success: false, error: `Role must be one of: ${PMX_INVITE_ROLES.join(", ")}` });
+    }
+
+    const inviterName = await displayNameForClerkId(req.userId!);
+    const workspace = await PmxUnderstandingModel.findOne({ projectId, isDeleted: false });
+    const workspaceName = workspace?.workspaceName || workspace?.productSummary?.name || "Workspace";
+    const roleLabel = PMX_ROLE_LABELS[role as PmxWorkspaceRole];
+
+    const results: Array<{ email: string; status: "sent" | "already_member" | "already_pending" | "invalid"; emailSent?: boolean }> = [];
+
+    for (const raw of emails) {
+      const email = String(raw || "").trim().toLowerCase();
+      if (!email || !EMAIL_RE.test(email)) {
+        results.push({ email: String(raw || ""), status: "invalid" });
+        continue;
+      }
+
+      const existingUser = await UserModel.findOne({ email });
+      if (existingUser && (await getMemberRole(projectId, existingUser.clerkId))) {
+        results.push({ email, status: "already_member" });
+        continue;
+      }
+
+      const existingInvite = await PmxWorkspaceEmailInviteModel.findOne({ projectId, email, status: "pending" });
+      if (existingInvite) {
+        results.push({ email, status: "already_pending" });
+        continue;
+      }
+
+      const token = generateEmailInviteToken();
+      const created = await PmxWorkspaceEmailInviteModel.create({
+        projectId,
+        email,
+        role: role as typeof PMX_INVITE_ROLES[number],
+        token,
+        invitedBy: req.userId,
+        status: "pending",
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+
+      let emailSent = true;
+      try {
+        await sendWorkspaceInviteEmail({
+          toEmail: email,
+          workspaceName,
+          inviterName,
+          roleLabel,
+          acceptUrl: `${env.FRONTEND_ORIGIN}/pmx/invite/${token}`,
+        });
+      } catch (err) {
+        emailSent = false;
+        console.error(`[Email Invite] Failed to send to ${email}:`, err);
+      }
+
+      await logAudit(req, projectId, "invite_email_sent", `Invited "${email}" as ${roleLabel}`, "PmxWorkspaceEmailInvite", created._id.toString());
+      results.push({ email, status: "sent", emailSent });
+    }
+
+    res.json({ success: true, data: results });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// List pending invitations for the Settings → Team "Pending Invitations" section.
+pmxRouter.get("/projects/:projectId/invites/email", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const invites = await PmxWorkspaceEmailInviteModel.find({ projectId, status: "pending" }).sort({ createdAt: -1 });
+    const data = await Promise.all(
+      invites.map(async (i) => ({
+        _id: i._id.toString(),
+        email: i.email,
+        role: i.role,
+        status: i.status,
+        invitedByName: await displayNameForClerkId(i.invitedBy),
+        createdAt: i.createdAt,
+        expiresAt: i.expiresAt,
+      }))
+    );
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Resend — extends the expiry and re-sends the same-token email.
+pmxRouter.post("/projects/:projectId/invites/email/:inviteId/resend", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const invite = await PmxWorkspaceEmailInviteModel.findOne({ _id: req.params.inviteId, projectId, status: "pending" });
+    if (!invite) return res.status(404).json({ success: false, error: "Invitation not found" });
+
+    invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await invite.save();
+
+    const inviterName = await displayNameForClerkId(req.userId!);
+    const workspace = await PmxUnderstandingModel.findOne({ projectId, isDeleted: false });
+    const workspaceName = workspace?.workspaceName || workspace?.productSummary?.name || "Workspace";
+
+    let emailSent = true;
+    try {
+      await sendWorkspaceInviteEmail({
+        toEmail: invite.email,
+        workspaceName,
+        inviterName,
+        roleLabel: PMX_ROLE_LABELS[invite.role as PmxWorkspaceRole],
+        acceptUrl: `${env.FRONTEND_ORIGIN}/pmx/invite/${invite.token}`,
+      });
+    } catch (err) {
+      emailSent = false;
+      console.error(`[Email Invite] Resend failed for ${invite.email}:`, err);
+    }
+
+    await logAudit(req, projectId, "invite_email_resent", `Resent invitation to "${invite.email}"`, "PmxWorkspaceEmailInvite", invite._id.toString());
+    res.json({ success: true, data: { emailSent } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Revoke a pending invitation.
+pmxRouter.post("/projects/:projectId/invites/email/:inviteId/revoke", requireWorkspaceAccess("admin"), async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const projectId = req.params.projectId as string;
+    const result = await PmxWorkspaceEmailInviteModel.updateOne(
+      { _id: req.params.inviteId, projectId, status: "pending" },
+      { status: "revoked" }
+    );
+    if (result.modifiedCount > 0) {
+      await logAudit(req, projectId, "invite_email_revoked", "Revoked a pending email invitation", "PmxWorkspaceEmailInvite", req.params.inviteId as string);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+type EmailInviteCheck =
+  | { status: "invalid" }
+  | { status: "revoked" | "expired"; invite: any }
+  | { status: "already_member" | "valid" | "email_mismatch"; invite: any; workspace: any };
+
+// Shared validation for the authenticated resolve/accept routes below —
+// deliberately re-run in full by accept() rather than trusting a prior
+// resolve() call, mirroring checkInviteCode's pattern for the code flow.
+async function checkEmailInvite(token: string, userId: string, userEmail: string): Promise<EmailInviteCheck> {
+  const invite = await PmxWorkspaceEmailInviteModel.findOne({ token });
+  if (!invite) return { status: "invalid" };
+  if (invite.status === "revoked") return { status: "revoked", invite };
+  if (invite.status !== "accepted" && invite.expiresAt.getTime() < Date.now()) {
+    return { status: "expired", invite };
+  }
+
+  const workspace = await PmxUnderstandingModel.findOne({ projectId: invite.projectId, isDeleted: false });
+  if (!workspace) return { status: "invalid" };
+
+  const normalizedUserEmail = (userEmail || "").trim().toLowerCase();
+
+  if (invite.status === "accepted") {
+    // Revisiting an already-consumed link — fine if it's the same person
+    // (idempotent), otherwise this specific invitation is no longer usable.
+    if (normalizedUserEmail === invite.email) return { status: "already_member", invite, workspace };
+    return { status: "invalid" };
+  }
+
+  // Hard rule: an invitation can only ever be accepted by the identity it
+  // was sent to — no exception, per the security requirement.
+  if (normalizedUserEmail !== invite.email) return { status: "email_mismatch", invite, workspace };
+
+  if (await getMemberRole(invite.projectId, userId)) return { status: "already_member", invite, workspace };
+
+  return { status: "valid", invite, workspace };
+}
+
+// Authenticated resolve — adds the email-match/already-member checks the
+// public preview (GET /api/pmx-invite-email/:token) can't do without
+// knowing who's asking.
+pmxRouter.get("/invites/email/resolve/:token", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const me = await UserModel.findOne({ clerkId: req.userId });
+    const result = await checkEmailInvite(req.params.token as string, req.userId!, me?.email || "");
+    switch (result.status) {
+      case "invalid":
+      case "revoked":
+      case "expired":
+        return res.json({ success: true, data: { status: result.status } });
+      case "email_mismatch":
+        return res.json({
+          success: true,
+          data: { status: "email_mismatch", workspaceName: result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace", invitedEmail: result.invite.email },
+        });
+      case "already_member":
+        return res.json({
+          success: true,
+          data: { status: "already_member", projectId: result.invite.projectId, workspaceName: result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace" },
+        });
+      case "valid":
+        return res.json({
+          success: true,
+          data: {
+            status: "valid",
+            workspaceName: result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace",
+            invitedByName: await displayNameForClerkId(result.invite.invitedBy),
+            role: result.invite.role,
+            roleLabel: PMX_ROLE_LABELS[result.invite.role as PmxWorkspaceRole],
+          },
+        });
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Accept — idempotent (upsert keyed on {projectId, userId}, exactly like
+// the code-accept route), grants exactly invite.role (never anything from
+// the request body), and hard-blocks on email mismatch.
+pmxRouter.post("/invites/email/accept/:token", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const me = await UserModel.findOne({ clerkId: req.userId });
+    const result = await checkEmailInvite(req.params.token as string, req.userId!, me?.email || "");
+    switch (result.status) {
+      case "invalid":
+        return res.status(400).json({ success: false, error: "Invalid invitation" });
+      case "revoked":
+        return res.status(400).json({ success: false, error: "This invitation has been revoked" });
+      case "expired":
+        return res.status(400).json({ success: false, error: "This invitation has expired" });
+      case "email_mismatch":
+        return res.status(403).json({ success: false, error: `This invitation was sent to ${result.invite.email} — sign in with that email to accept it.` });
+      case "already_member": {
+        const workspaceName = result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace";
+        return res.json({ success: true, data: { alreadyMember: true, projectId: result.invite.projectId, workspaceName } });
+      }
+      case "valid": {
+        const workspaceName = result.workspace.workspaceName || result.workspace.productSummary?.name || "Workspace";
+
+        await PmxWorkspaceMemberModel.findOneAndUpdate(
+          { projectId: result.invite.projectId, userId: req.userId },
+          { $setOnInsert: { projectId: result.invite.projectId, userId: req.userId, role: result.invite.role, invitedBy: result.invite.invitedBy, joinedAt: new Date() } },
+          { upsert: true }
+        );
+        await PmxWorkspaceEmailInviteModel.updateOne({ _id: result.invite._id }, { status: "accepted", acceptedAt: new Date() });
+
+        await logAudit(req, result.invite.projectId, "member_joined", `A new member joined the workspace as "${PMX_ROLE_LABELS[result.invite.role as PmxWorkspaceRole]}" via email invitation`, "PmxWorkspaceMember", req.userId);
+        return res.json({ success: true, data: { projectId: result.invite.projectId, workspaceName, role: result.invite.role } });
+      }
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Pending invitations addressed to the signed-in user's own (synced) email,
+// across every workspace — powers JoinWorkspaceModal's "Accept an
+// invitation" tab so a signed-in user doesn't have to dig through email.
+pmxRouter.get("/invites/email/pending-for-me", async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const me = await UserModel.findOne({ clerkId: req.userId });
+    if (!me?.email) return res.json({ success: true, data: [] });
+
+    const invites = await PmxWorkspaceEmailInviteModel.find({
+      email: me.email.toLowerCase(),
+      status: "pending",
+      expiresAt: { $gt: new Date() },
+    }).sort({ createdAt: -1 });
+
+    const workspaces = await PmxUnderstandingModel.find(
+      { projectId: { $in: invites.map((i) => i.projectId) }, isDeleted: false },
+      { projectId: 1, workspaceName: 1, productSummary: 1 }
+    );
+    const workspaceByProject = new Map(workspaces.map((w) => [w.projectId, w]));
+
+    const data = await Promise.all(
+      invites
+        .filter((i) => workspaceByProject.has(i.projectId))
+        .map(async (i) => {
+          const w = workspaceByProject.get(i.projectId)!;
+          return {
+            token: i.token,
+            workspaceName: w.workspaceName || w.productSummary?.name || "Workspace",
+            role: i.role,
+            roleLabel: PMX_ROLE_LABELS[i.role as PmxWorkspaceRole],
+            invitedByName: await displayNameForClerkId(i.invitedBy),
+          };
+        })
+    );
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Router-level error handler: every route above funnels its catch block
 // into next(err), so this runs before the generic app-level errorHandler
 // and gives UsageCapExceededError its own 402 shape instead of falling
 // through to that handler's generic { error: message } / 500.
 pmxRouter.use((err: any, _req: AuthenticatedRequest, res: any, next: any) => {
   if (err instanceof UsageCapExceededError) {
-    return res.status(402).json({ success: false, error: "Daily AI usage limit reached", cap: HARD_DAILY_CAP_USD });
+    return res.status(402).json({ success: false, code: "DAILY_CAP_EXCEEDED", error: "Daily AI usage limit reached", cap: HARD_DAILY_CAP_USD });
+  }
+  if (err instanceof TokenLimitExceededError) {
+    return res.status(402).json({
+      success: false,
+      code: "TOKEN_LIMIT_REACHED",
+      error: "You've used your 100,000-token allowance for this period.",
+      limit: err.limit,
+    });
+  }
+  if (err instanceof TrialExpiredError) {
+    return res.status(402).json({ success: false, code: "TRIAL_EXPIRED", error: "Your free trial has ended." });
   }
   next(err);
 });

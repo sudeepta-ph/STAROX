@@ -12,18 +12,31 @@ export async function getPmxHeaders() {
 }
 
 const DAILY_CAP_MESSAGE = "You've hit today's AI usage limit, resets at midnight.";
+const TOKEN_LIMIT_MESSAGE = "You've used your 100,000-token allowance for this period. Upgrade the workspace to continue.";
+const TRIAL_EXPIRED_MESSAGE = "Your free trial has ended. Upgrade the workspace to continue.";
 
-// Shared fetch wrapper for PMX endpoints — adds auth headers and gives the
-// backend's 402 "daily AI usage cap" response (see backend pmx.ts /
-// deepseek.ts UsageCapExceededError) a clear toast instead of it reading as
-// a generic/unexplained failure at each call site.
+// Shared fetch wrapper for PMX endpoints — adds auth headers and gives every
+// backend 402 (daily $ cap / per-user token limit / expired workspace
+// trial — see deepseek.ts and pmx.ts's router-level error handler) a clear
+// toast instead of it reading as a generic/unexplained failure at each call
+// site. The Usage & Plan settings page renders its own full "Usage limit
+// reached"/"Trial expired" cards from the same `code` field directly (see
+// UsagePlan.tsx) rather than relying on this toast.
 export async function pmxFetch(url: string, options: RequestInit = {}) {
   const headers = await getPmxHeaders();
   const res = await fetch(url, { ...options, headers: { ...headers, ...(options.headers as Record<string, string> | undefined) } });
   const json = await res.json().catch(() => ({ success: false, error: "Request failed" }));
   if (res.status === 402) {
-    json.error = DAILY_CAP_MESSAGE;
-    toast({ variant: "destructive", title: "Daily AI usage limit reached", description: DAILY_CAP_MESSAGE });
+    if (json.code === "TOKEN_LIMIT_REACHED") {
+      json.error = TOKEN_LIMIT_MESSAGE;
+      toast({ variant: "destructive", title: "Usage limit reached", description: TOKEN_LIMIT_MESSAGE });
+    } else if (json.code === "TRIAL_EXPIRED") {
+      json.error = TRIAL_EXPIRED_MESSAGE;
+      toast({ variant: "destructive", title: "Trial expired", description: TRIAL_EXPIRED_MESSAGE });
+    } else {
+      json.error = DAILY_CAP_MESSAGE;
+      toast({ variant: "destructive", title: "Daily AI usage limit reached", description: DAILY_CAP_MESSAGE });
+    }
   }
   return json;
 }
@@ -137,27 +150,69 @@ export interface PmxSolution {
   combinedFromSolutionIds?: string[];
 }
 
+export const PMX_DEPARTMENTS = [
+  "Product", "Design", "Engineering", "QA", "DevOps", "Security",
+  "Marketing", "Sales", "Customer Success", "Support", "Leadership",
+] as const;
+export type PmxDepartment = typeof PMX_DEPARTMENTS[number];
+
 export interface PmxExecutionTask {
   _id: string;
   solutionId?: string;
+  ideaPrdId?: string;
+  planId?: string;
   title: string;
   description: string;
-  type: "frontend" | "backend" | "infra" | "testing" | "deployment" | "ux";
+  type: "frontend" | "backend" | "infra" | "testing" | "deployment" | "ux" | "other";
+  department: PmxDepartment;
   sprintPlan: string;
+  sprintNumber?: number;
+  milestone?: string;
+  milestoneOrder?: number;
   priority: "high" | "medium" | "low";
   status: "todo" | "in_progress" | "review" | "done";
   timeEstimate: string;
-  assignee?: string;
+  assignee?: string; // doubles as "suggested owner role"
+  dueWeek?: number;
+  dueDate?: string;
+  prdSectionLink?: string;
+  acceptanceCriteria: string[];
+  implementationNotes?: string;
   dependencies: string[];
+  dependencyTaskIds: string[];
+  diffStatus?: "added" | "updated";
+  diffSummary?: string;
 }
 
 export interface PmxArtifact {
   _id: string;
   title: string;
   type: string;
+  department?: string;
+  planId?: string;
   content: string;
   format: string;
   createdAt: string;
+}
+
+export interface PmxExecutionPlan {
+  _id: string;
+  projectId: string;
+  type: "prd" | "custom";
+  sourceType?: "solution" | "ideaPrd";
+  sourceId?: string;
+  sourcePrdVersion?: number;
+  name?: string;
+  goal?: string;
+  description?: string;
+  departments: string[];
+  milestones: Array<{ name: string; order: number; goal: string }>;
+  sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>;
+  startDate: string;
+  status: "generating" | "completed" | "failed";
+  artifactsStatus: "pending" | "generating" | "completed" | "partial_failed";
+  artifactJobs: Array<{ type: string; department: string; title: string; status: "pending" | "done" | "failed" }>;
+  version: number;
 }
 
 export interface PmxAuditLog {
@@ -168,7 +223,33 @@ export interface PmxAuditLog {
   createdAt: string;
 }
 
-export type PmxWorkspaceRole = "owner" | "admin" | "member";
+export const PMX_WORKSPACE_ROLES = [
+  "owner", "admin", "member",
+  "product_manager", "engineering", "designer", "qa", "marketing", "sales", "support", "viewer",
+] as const;
+export type PmxWorkspaceRole = typeof PMX_WORKSPACE_ROLES[number];
+
+// Roles an invite code may grant — everything except "owner" (never
+// invite-granted) and the legacy generic "member" (new codes always pick a
+// named role).
+export const PMX_INVITE_ROLES = [
+  "admin", "member", "product_manager", "engineering", "designer", "qa", "marketing", "sales", "support", "viewer",
+] as const;
+export type PmxInviteRole = typeof PMX_INVITE_ROLES[number];
+
+export const PMX_ROLE_LABELS: Record<PmxWorkspaceRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+  product_manager: "Product Manager",
+  engineering: "Engineering",
+  designer: "Designer",
+  qa: "QA",
+  marketing: "Marketing",
+  sales: "Sales",
+  support: "Support",
+  viewer: "Viewer",
+};
 
 export interface PmxWorkspaceSummary {
   projectId: string;
@@ -178,6 +259,69 @@ export interface PmxWorkspaceSummary {
   primarySource: { _id: string; name: string; url?: string; type: string } | null;
   updatedAt: string;
   role: PmxWorkspaceRole;
+  memberCount: number;
+  joinedAt: string;
+}
+
+export interface PmxInviteCode {
+  _id: string;
+  label: string;
+  role: PmxInviteRole;
+  createdAt: string;
+  expiresAt: string | null;
+  maxUses: number | null;
+  usageCount: number;
+}
+
+export type PmxInviteResolveStatus = "valid" | "already_member" | "invalid" | "expired" | "revoked" | "limit_reached";
+
+export interface PmxInviteResolveResult {
+  status: PmxInviteResolveStatus;
+  message?: string;
+  workspaceName?: string;
+  projectId?: string;
+  memberCount?: number;
+  sourceCount?: number;
+  role?: PmxInviteRole;
+  roleLabel?: string;
+}
+
+// ── Invite by email — second, complementary way to add people. Bound to a
+// specific email address, unlike the anonymous, shareable invite codes above.
+export interface PmxEmailInvite {
+  _id: string;
+  email: string;
+  role: PmxInviteRole;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PmxEmailInviteSendResult {
+  email: string;
+  status: "sent" | "already_member" | "already_pending" | "invalid";
+  emailSent?: boolean;
+}
+
+export type PmxEmailInviteResolveStatus = "valid" | "accepted" | "already_member" | "invalid" | "expired" | "revoked" | "email_mismatch";
+
+export interface PmxEmailInviteResolveResult {
+  status: PmxEmailInviteResolveStatus;
+  workspaceName?: string;
+  projectId?: string;
+  role?: PmxInviteRole;
+  roleLabel?: string;
+  invitedByName?: string;
+  invitedEmail?: string;
+}
+
+export interface PmxPendingInviteForMe {
+  token: string;
+  workspaceName: string;
+  role: PmxInviteRole;
+  roleLabel: string;
+  invitedByName: string;
 }
 
 export interface PmxWorkspaceMember {
@@ -189,6 +333,41 @@ export interface PmxWorkspaceMember {
   name: string;
   email: string;
   avatar: string;
+}
+
+// ── Usage & Plan — workspace trial (shared across the whole workspace) and
+// per-user token allowance (independent per member). See backend
+// GET /billing/summary for the exact response this mirrors.
+export interface PmxUserUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  limit: number;
+  remaining: number;
+}
+
+export interface PmxMemberUsage extends PmxUserUsage {
+  userId: string;
+  name: string;
+  role: PmxWorkspaceRole;
+  status: "active" | "limit_reached";
+}
+
+export interface PmxBillingSummary {
+  plan: "trial" | "active";
+  trial: {
+    startedAt: string;
+    endsAt: string;
+    daysRemaining: number;
+    status: "trial_active" | "trial_expired" | "active";
+  } | null;
+  memberCount: number;
+  currentUser: PmxUserUsage;
+  limit: number;
+  upgradeRequestedAt: string | null;
+  // Present only when the signed-in user is an owner/admin — omitted
+  // (not just empty) for plain members, matching what the backend sends.
+  members?: PmxMemberUsage[];
 }
 
 const ACTIVE_PROJECT_KEY = "pmx_active_project_id";
@@ -233,7 +412,8 @@ interface PmxStore {
   tasks: PmxExecutionTask[];
   artifacts: PmxArtifact[];
   history: PmxAuditLog[];
-  
+  executionPlan: PmxExecutionPlan | null;
+
   loading: {
     inputs: boolean;
     understanding: boolean;
@@ -246,6 +426,7 @@ interface PmxStore {
     artifacts: boolean;
     history: boolean;
     pipeline: boolean;
+    executionGenerate: boolean;
   };
 
   workspaces: PmxWorkspaceSummary[];
@@ -259,36 +440,46 @@ interface PmxStore {
   members: PmxWorkspaceMember[];
   membersLoading: boolean;
   fetchMembers: () => Promise<void>;
-  changeMemberRole: (memberId: string, role: "admin" | "member") => Promise<boolean>;
+  changeMemberRole: (memberId: string, role: PmxWorkspaceRole) => Promise<boolean>;
   removeMember: (memberId: string) => Promise<boolean>;
+
+  billingSummary: PmxBillingSummary | null;
+  billingSummaryLoading: boolean;
+  fetchBillingSummary: () => Promise<void>;
+  requestUpgrade: () => Promise<boolean>;
 
   // Legacy link-based invite accept — kept only so an already-distributed
   // /pmx/join/<uuid> link still works (see PmxJoin.tsx). Nothing generates
   // new links anymore; use the invite-code actions below for that.
   acceptInvite: (token: string) => Promise<{ projectId: string; workspaceName: string } | null>;
 
-  // Current invite-code mechanism. `code` is only ever populated right
-  // after generate() returns it — the server never re-exposes the
-  // plaintext, so a fresh page load leaves `code` null even though an
-  // active code exists (reflected by `status`/metadata).
-  inviteCode: {
-    code: string | null;
-    status: "none" | "active";
-    createdAt?: string;
-    usageCount?: number;
-    maxUses?: number | null;
-    expiresAt?: string | null;
-  } | null;
-  fetchInviteCode: () => Promise<void>;
-  generateInviteCode: () => Promise<void>;
-  revokeInviteCode: () => Promise<void>;
-  resolveInviteCode: (code: string) => Promise<{
-    status: "valid" | "already_member" | "invalid" | "expired" | "revoked" | "limit_reached";
-    message?: string;
-    workspaceName?: string;
-    projectId?: string;
-  } | null>;
-  acceptInviteCode: (code: string) => Promise<{ alreadyMember?: boolean; projectId: string; workspaceName: string } | null>;
+  // Current invite-code mechanism — multiple simultaneous, named,
+  // role-specific codes per workspace (an "Engineering Invite", a
+  // "Marketing Invite", etc. can coexist). Plaintext is only ever present
+  // right after createInviteCode() returns it — the server never re-exposes
+  // it, so a fresh page load shows codes without their plaintext.
+  inviteCodes: PmxInviteCode[];
+  inviteCodesLoading: boolean;
+  lastCreatedCode: { codeId: string; plaintext: string } | null;
+  fetchInviteCodes: () => Promise<void>;
+  createInviteCode: (opts: { role: PmxInviteRole; label?: string; expiresAt?: string; maxUses?: number }) => Promise<string | null>;
+  revokeInviteCodeById: (codeId: string) => Promise<void>;
+  resolveInviteCode: (code: string) => Promise<PmxInviteResolveResult | null>;
+  acceptInviteCode: (code: string) => Promise<{ alreadyMember?: boolean; projectId: string; workspaceName: string; role?: PmxInviteRole } | null>;
+
+  // Invite by email — workspace-scoped list (Settings → Team) plus three
+  // actions that aren't tied to the active projectId (the accept page and
+  // JoinWorkspaceModal's "Accept an invitation" tab operate purely off a
+  // token, same shape as the invite-code resolve/accept pair above).
+  emailInvites: PmxEmailInvite[];
+  emailInvitesLoading: boolean;
+  fetchEmailInvites: () => Promise<void>;
+  sendEmailInvites: (opts: { emails: string[]; role: PmxInviteRole }) => Promise<PmxEmailInviteSendResult[] | null>;
+  resendEmailInvite: (inviteId: string) => Promise<boolean>;
+  revokeEmailInviteById: (inviteId: string) => Promise<void>;
+  resolveEmailInvite: (token: string) => Promise<PmxEmailInviteResolveResult | null>;
+  acceptEmailInvite: (token: string) => Promise<{ alreadyMember?: boolean; projectId: string; workspaceName: string; role?: PmxInviteRole } | null>;
+  fetchPendingInvitesForMe: () => Promise<PmxPendingInviteForMe[]>;
 
   setProjectId: (id: string) => void;
   // Switches to a brand-new, not-yet-real workspace context — no backend
@@ -314,6 +505,11 @@ interface PmxStore {
   fetchTasks: () => Promise<void>;
   fetchArtifacts: () => Promise<void>;
   fetchHistory: () => Promise<void>;
+  fetchExecutionPlan: () => Promise<void>;
+  generateExecution: (source: { solutionId?: string; ideaPrdId?: string }) => Promise<boolean>;
+  generateCustomExecution: (input: { name: string; goal: string; description?: string; departments: string[] }) => Promise<boolean>;
+  regenerateExecution: (source: { solutionId?: string; ideaPrdId?: string }) => Promise<{ added: number; updated: number; removed: number } | null>;
+  dismissExecutionDiff: () => Promise<void>;
   fetchAll: () => Promise<void>;
   runPipeline: (selectedSourceIds?: string[]) => Promise<void>;
   selectedSourceIds: string[];
@@ -344,7 +540,13 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
   role: null,
   members: [],
   membersLoading: false,
-  inviteCode: null,
+  billingSummary: null,
+  billingSummaryLoading: false,
+  inviteCodes: [],
+  inviteCodesLoading: false,
+  lastCreatedCode: null,
+  emailInvites: [],
+  emailInvitesLoading: false,
   inputs: [],
   understanding: null,
   ideaPrd: null,
@@ -356,6 +558,7 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
   tasks: [],
   artifacts: [],
   history: [],
+  executionPlan: null,
   selectedSourceIds: [],
   setSelectedSourceIds: (ids) => set({ selectedSourceIds: ids }),
 
@@ -370,7 +573,8 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     tasks: false,
     artifacts: false,
     history: false,
-    pipeline: false
+    pipeline: false,
+    executionGenerate: false
   },
 
   setProjectId: (id) => {
@@ -612,6 +816,106 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     }
   },
 
+  fetchExecutionPlan: async () => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/execution/plan?projectId=${get().projectId}`, { headers });
+      const json = await res.json();
+      if (json.success) set({ executionPlan: json.data });
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
+  generateExecution: async (source) => {
+    set((state) => ({ loading: { ...state.loading, executionGenerate: true } }));
+    try {
+      const json = await pmxFetch(`${API_URL}/pmx/execution/generate`, {
+        method: "POST",
+        body: JSON.stringify(source),
+      });
+      if (json.success) {
+        // Refetch the full task list rather than trusting json.data.tasks
+        // (just this call's newly-created batch) — a project can now have
+        // more than one execution plan's tasks coexisting on the same
+        // board, so replacing `tasks` wholesale with only the new batch
+        // would silently drop every earlier execution's tasks from the UI.
+        set({ executionPlan: json.data.plan });
+        await get().fetchTasks();
+        return true;
+      }
+      toast({ variant: "destructive", title: "Couldn't generate execution plan", description: json.error });
+      return false;
+    } catch (err) {
+      console.error(err);
+      toast({ variant: "destructive", title: "Couldn't generate execution plan — check your connection" });
+      return false;
+    } finally {
+      set((state) => ({ loading: { ...state.loading, executionGenerate: false } }));
+    }
+  },
+
+  generateCustomExecution: async (input) => {
+    set((state) => ({ loading: { ...state.loading, executionGenerate: true } }));
+    try {
+      const json = await pmxFetch(`${API_URL}/pmx/execution/generate-custom`, {
+        method: "POST",
+        body: JSON.stringify({ ...input, projectId: get().projectId }),
+      });
+      if (json.success) {
+        // See the comment in generateExecution above — refetch the full
+        // list rather than replacing it with just this batch.
+        set({ executionPlan: json.data.plan });
+        await get().fetchTasks();
+        return true;
+      }
+      toast({ variant: "destructive", title: "Couldn't create execution", description: json.error });
+      return false;
+    } catch (err) {
+      console.error(err);
+      toast({ variant: "destructive", title: "Couldn't create execution — check your connection" });
+      return false;
+    } finally {
+      set((state) => ({ loading: { ...state.loading, executionGenerate: false } }));
+    }
+  },
+
+  regenerateExecution: async (source) => {
+    set((state) => ({ loading: { ...state.loading, executionGenerate: true } }));
+    try {
+      const json = await pmxFetch(`${API_URL}/pmx/execution/regenerate`, {
+        method: "POST",
+        body: JSON.stringify(source),
+      });
+      if (json.success) {
+        set({ executionPlan: json.data.plan, tasks: json.data.tasks });
+        return json.data.diff as { added: number; updated: number; removed: number };
+      }
+      toast({ variant: "destructive", title: "Couldn't regenerate execution plan", description: json.error });
+      return null;
+    } catch (err) {
+      console.error(err);
+      toast({ variant: "destructive", title: "Couldn't regenerate execution plan — check your connection" });
+      return null;
+    } finally {
+      set((state) => ({ loading: { ...state.loading, executionGenerate: false } }));
+    }
+  },
+
+  dismissExecutionDiff: async () => {
+    try {
+      const headers = await getPmxHeaders();
+      await fetch(`${API_URL}/pmx/execution/dismiss-diff`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: get().projectId }),
+      });
+      await get().fetchTasks();
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
   fetchAll: async () => {
     await Promise.all([
       get().fetchWorkspaces(),
@@ -625,7 +929,8 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
       get().fetchSolutions(),
       get().fetchTasks(),
       get().fetchArtifacts(),
-      get().fetchHistory()
+      get().fetchHistory(),
+      get().fetchExecutionPlan()
     ]);
   },
 
@@ -672,7 +977,8 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
           solutions: [],
           tasks: [],
           artifacts: [],
-          history: []
+          history: [],
+          executionPlan: null
         });
         return true;
       }
@@ -732,69 +1038,87 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     }
   },
 
-  fetchInviteCode: async () => {
+  fetchBillingSummary: async () => {
+    set({ billingSummaryLoading: true });
     try {
       const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes/current`, { headers });
+      const res = await fetch(`${API_URL}/pmx/billing/summary?projectId=${encodeURIComponent(get().projectId)}`, { headers });
       const json = await res.json();
-      if (!json.success) return;
-      if (!json.data.exists) {
-        set({ inviteCode: { code: null, status: "none" } });
-        return;
-      }
-      // Preserve a plaintext code already held in memory from this
-      // session's own generate() call — a metadata refresh shouldn't blank
-      // it out from under the settings page.
-      const existingCode = get().inviteCode?.code ?? null;
-      set({
-        inviteCode: {
-          code: existingCode,
-          status: "active",
-          createdAt: json.data.createdAt,
-          usageCount: json.data.usageCount,
-          maxUses: json.data.maxUses,
-          expiresAt: json.data.expiresAt,
-        },
-      });
+      if (json.success) set({ billingSummary: json.data });
     } catch (err) {
       console.error(err);
+    } finally {
+      set({ billingSummaryLoading: false });
     }
   },
 
-  generateInviteCode: async () => {
+  requestUpgrade: async () => {
     try {
       const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes/generate`, {
+      const res = await fetch(`${API_URL}/pmx/billing/upgrade-request`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ projectId: get().projectId }),
+      });
+      const json = await res.json();
+      if (!json.success) return false;
+      await get().fetchBillingSummary();
+      return true;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
+  },
+
+  fetchInviteCodes: async () => {
+    set({ inviteCodesLoading: true });
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes`, { headers });
+      const json = await res.json();
+      if (json.success) set({ inviteCodes: json.data });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      set({ inviteCodesLoading: false });
+    }
+  },
+
+  createInviteCode: async ({ role, label, expiresAt, maxUses }) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ role, label, expiresAt, maxUses }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        toast({ variant: "destructive", title: "Couldn't create invite code", description: json.error });
+        return null;
+      }
+      set({ lastCreatedCode: { codeId: json.data._id, plaintext: json.data.code } });
+      await get().fetchInviteCodes();
+      return json.data.code as string;
+    } catch (err) {
+      console.error(err);
+      toast({ variant: "destructive", title: "Couldn't create invite code — check your connection" });
+      return null;
+    }
+  },
+
+  revokeInviteCodeById: async (codeId) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes/${codeId}/revoke`, {
         method: "POST",
         headers,
       });
       const json = await res.json();
       if (json.success) {
-        set({
-          inviteCode: {
-            code: json.data.code,
-            status: "active",
-            createdAt: json.data.createdAt,
-            usageCount: 0,
-            maxUses: json.data.maxUses,
-            expiresAt: json.data.expiresAt,
-          },
-        });
+        if (get().lastCreatedCode?.codeId === codeId) set({ lastCreatedCode: null });
+        await get().fetchInviteCodes();
       }
-    } catch (err) {
-      console.error(err);
-    }
-  },
-
-  revokeInviteCode: async () => {
-    try {
-      const headers = await getPmxHeaders();
-      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invite-codes/revoke`, {
-        method: "POST",
-        headers,
-      });
-      const json = await res.json();
-      if (json.success) set({ inviteCode: { code: null, status: "none" } });
     } catch (err) {
       console.error(err);
     }
@@ -831,6 +1155,109 @@ export const usePmxStore = create<PmxStore>((set, get) => ({
     } catch (err) {
       console.error(err);
       return null;
+    }
+  },
+
+  fetchEmailInvites: async () => {
+    set({ emailInvitesLoading: true });
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invites/email`, { headers });
+      const json = await res.json();
+      if (json.success) set({ emailInvites: json.data });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      set({ emailInvitesLoading: false });
+    }
+  },
+
+  sendEmailInvites: async ({ emails, role }) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invites/email`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ emails, role }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        toast({ variant: "destructive", title: "Couldn't send invitations", description: json.error });
+        return null;
+      }
+      await get().fetchEmailInvites();
+      return json.data as PmxEmailInviteSendResult[];
+    } catch (err) {
+      console.error(err);
+      toast({ variant: "destructive", title: "Couldn't send invitations — check your connection" });
+      return null;
+    }
+  },
+
+  resendEmailInvite: async (inviteId) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invites/email/${inviteId}/resend`, {
+        method: "POST",
+        headers,
+      });
+      const json = await res.json();
+      return !!json.success;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
+  },
+
+  revokeEmailInviteById: async (inviteId) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/projects/${encodeURIComponent(get().projectId)}/invites/email/${inviteId}/revoke`, {
+        method: "POST",
+        headers,
+      });
+      const json = await res.json();
+      if (json.success) await get().fetchEmailInvites();
+    } catch (err) {
+      console.error(err);
+    }
+  },
+
+  resolveEmailInvite: async (token) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/invites/email/resolve/${token}`, { headers });
+      const json = await res.json();
+      return json.success ? json.data : null;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  },
+
+  acceptEmailInvite: async (token) => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/invites/email/accept/${token}`, { method: "POST", headers });
+      const json = await res.json();
+      if (!json.success) return null;
+      get().setProjectId(json.data.projectId);
+      return json.data;
+    } catch (err) {
+      console.error(err);
+      return null;
+    }
+  },
+
+  fetchPendingInvitesForMe: async () => {
+    try {
+      const headers = await getPmxHeaders();
+      const res = await fetch(`${API_URL}/pmx/invites/email/pending-for-me`, { headers });
+      const json = await res.json();
+      return json.success ? json.data : [];
+    } catch (err) {
+      console.error(err);
+      return [];
     }
   },
 

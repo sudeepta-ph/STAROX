@@ -2,6 +2,7 @@ import { env } from "../../config/env";
 import { AI_CONFIG, AI_MODEL } from "./models";
 import { PmxTokenUsageModel } from "../../models/Pmx";
 import { estimateCost } from "./pricing";
+import { assertWorkspaceTrialActive, estimateTokens, reserveUsage, reconcileUsage, releaseReservation } from "../pmxUsage";
 
 // Observability-only guardrail: when a user's same-day AI spend crosses this
 // threshold, logTokenUsage below logs a console.warn so it shows up in log
@@ -538,72 +539,86 @@ export async function callDeepSeekWithUsage(
     throw new UsageCapExceededError(userId, todaySpendUsd, HARD_DAILY_CAP_USD);
   }
 
+  // Workspace trial + per-user token allowance — the single choke point
+  // every AI call passes through, so this covers every PMX generation/
+  // analysis stage uniformly (see services/pmxUsage.ts for the atomic
+  // reserve/reconcile mechanics).
+  await assertWorkspaceTrialActive(projectId);
+  const estimatedTokens = estimateTokens(prompt, systemPrompt, maxTokens);
+  await reserveUsage(userId, projectId, estimatedTokens);
+
   const selectedModel = model || AI_CONFIG.DEFAULT_MODEL;
   const endpoint = `${AI_CONFIG.BASE_URL}/chat/completions`;
 
   const maxRetries = 3;
   let lastError: any = null;
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), AI_CONFIG.TIMEOUT);
+  try {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), AI_CONFIG.TIMEOUT);
 
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt },
-          ],
-          temperature: AI_CONFIG.TEMPERATURE,
-          max_tokens: maxTokens,
-          response_format: { type: "json_object" },
-        }),
-        signal: controller.signal,
-      });
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: prompt },
+            ],
+            temperature: AI_CONFIG.TEMPERATURE,
+            max_tokens: maxTokens,
+            response_format: { type: "json_object" },
+          }),
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        if ((response.status === 429 || response.status === 502 || response.status === 503) && attempt < maxRetries) {
-          console.warn(`[DeepSeek AI] Status ${response.status} on attempt ${attempt}. Retrying...`);
-          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        if (!response.ok) {
+          const errorText = await response.text();
+          if ((response.status === 429 || response.status === 502 || response.status === 503) && attempt < maxRetries) {
+            console.warn(`[DeepSeek AI] Status ${response.status} on attempt ${attempt}. Retrying...`);
+            await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+            continue;
+          }
+          if (response.status === 401) throw new Error("Invalid DEEPSEEK_API_KEY configured.");
+          throw new Error(`DeepSeek API failed with status ${response.status}: ${errorText}`);
+        }
+
+        const result = await response.json();
+        logIfTruncated(result, stage, maxTokens);
+        const usage: DeepSeekUsage = result.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+        void logTokenUsage(usage, stage, userId, projectId, selectedModel);
+        void reconcileUsage(userId, projectId, estimatedTokens, usage);
+        return {
+          content: result.choices[0]?.message?.content ?? "{}",
+          usage,
+          finishReason: result.choices?.[0]?.finish_reason,
+        };
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+          console.warn(`[DeepSeek AI] Timeout reached on attempt ${attempt}.`);
+          if (attempt < maxRetries) continue;
+          throw new Error("DeepSeek request timed out.");
+        }
+        lastError = err;
+        if (attempt < maxRetries) {
+          console.warn(`[DeepSeek AI] Error on attempt ${attempt}: ${err.message}. Retrying...`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           continue;
         }
-        if (response.status === 401) throw new Error("Invalid DEEPSEEK_API_KEY configured.");
-        throw new Error(`DeepSeek API failed with status ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-      logIfTruncated(result, stage, maxTokens);
-      const usage: DeepSeekUsage = result.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-      void logTokenUsage(usage, stage, userId, projectId, selectedModel);
-      return {
-        content: result.choices[0]?.message?.content ?? "{}",
-        usage,
-        finishReason: result.choices?.[0]?.finish_reason,
-      };
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (err.name === "AbortError") {
-        console.warn(`[DeepSeek AI] Timeout reached on attempt ${attempt}.`);
-        if (attempt < maxRetries) continue;
-        throw new Error("DeepSeek request timed out.");
-      }
-      lastError = err;
-      if (attempt < maxRetries) {
-        console.warn(`[DeepSeek AI] Error on attempt ${attempt}: ${err.message}. Retrying...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        continue;
       }
     }
-  }
 
-  throw lastError || new Error("All DeepSeek retries failed");
+    throw lastError || new Error("All DeepSeek retries failed");
+  } catch (err) {
+    await releaseReservation(userId, projectId, estimatedTokens);
+    throw err;
+  }
 }
 
 export async function callDeepSeek(
@@ -622,80 +637,97 @@ export async function callDeepSeek(
     throw new Error("Missing DEEPSEEK_API_KEY environment variable. Check backend/.env");
   }
 
+  // Workspace trial + per-user token allowance — see callDeepSeekWithUsage
+  // above for the full rationale; this is the same choke point, applied to
+  // the (much more heavily used) fire-and-forget usage variant.
+  await assertWorkspaceTrialActive(projectId);
+  const estimatedTokens = estimateTokens(prompt, systemPrompt, maxTokens);
+  await reserveUsage(userId, projectId, estimatedTokens);
+
   const selectedModel = model || AI_CONFIG.DEFAULT_MODEL;
   const endpoint = `${AI_CONFIG.BASE_URL}/chat/completions`;
 
   const maxRetries = 3;
   let lastError: any = null;
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), AI_CONFIG.TIMEOUT);
+  try {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), AI_CONFIG.TIMEOUT);
 
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt,
-            },
-            { role: "user", content: prompt },
-          ],
-          temperature: AI_CONFIG.TEMPERATURE,
-          max_tokens: maxTokens,
-          response_format: { type: "json_object" },
-        }),
-        signal: signal || controller.signal,
-      });
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: [
+              {
+                role: "system",
+                content: systemPrompt,
+              },
+              { role: "user", content: prompt },
+            ],
+            temperature: AI_CONFIG.TEMPERATURE,
+            max_tokens: maxTokens,
+            response_format: { type: "json_object" },
+          }),
+          signal: signal || controller.signal,
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        
-        // Handle rate limits (429) or transient gateway overloads (502, 503) with backoff retry
-        if ((response.status === 429 || response.status === 502 || response.status === 503) && attempt < maxRetries) {
-          console.warn(`[DeepSeek AI] Status ${response.status} on attempt ${attempt}. Retrying...`);
-          await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        if (!response.ok) {
+          const errorText = await response.text();
+
+          // Handle rate limits (429) or transient gateway overloads (502, 503) with backoff retry
+          if ((response.status === 429 || response.status === 502 || response.status === 503) && attempt < maxRetries) {
+            console.warn(`[DeepSeek AI] Status ${response.status} on attempt ${attempt}. Retrying...`);
+            await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+            continue;
+          }
+
+          if (response.status === 401) {
+            throw new Error("Invalid DEEPSEEK_API_KEY configured.");
+          }
+
+          throw new Error(`DeepSeek API failed with status ${response.status}: ${errorText}`);
+        }
+
+        const result = await response.json();
+        logIfTruncated(result, stage, maxTokens);
+        if (onUsage && result.usage) onUsage(result.usage);
+        if (result.usage) {
+          void logTokenUsage(result.usage, stage, userId, projectId, selectedModel);
+          void reconcileUsage(userId, projectId, estimatedTokens, result.usage);
+        } else {
+          void releaseReservation(userId, projectId, estimatedTokens);
+        }
+        return result.choices[0]?.message?.content ?? "{}";
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+
+        if (err.name === "AbortError" && !signal) {
+          console.warn(`[DeepSeek AI] Timeout reached on attempt ${attempt}.`);
+          if (attempt < maxRetries) continue;
+          throw new Error("DeepSeek request timed out.");
+        }
+
+        lastError = err;
+        if (attempt < maxRetries) {
+          console.warn(`[DeepSeek AI] Error on attempt ${attempt}: ${err.message}. Retrying...`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
           continue;
         }
-
-        if (response.status === 401) {
-          throw new Error("Invalid DEEPSEEK_API_KEY configured.");
-        }
-
-        throw new Error(`DeepSeek API failed with status ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-      logIfTruncated(result, stage, maxTokens);
-      if (onUsage && result.usage) onUsage(result.usage);
-      if (result.usage) void logTokenUsage(result.usage, stage, userId, projectId, selectedModel);
-      return result.choices[0]?.message?.content ?? "{}";
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-
-      if (err.name === "AbortError" && !signal) {
-        console.warn(`[DeepSeek AI] Timeout reached on attempt ${attempt}.`);
-        if (attempt < maxRetries) continue;
-        throw new Error("DeepSeek request timed out.");
-      }
-
-      lastError = err;
-      if (attempt < maxRetries) {
-        console.warn(`[DeepSeek AI] Error on attempt ${attempt}: ${err.message}. Retrying...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        continue;
       }
     }
-  }
 
-  throw lastError || new Error("All DeepSeek retries failed");
+    throw lastError || new Error("All DeepSeek retries failed");
+  } catch (err) {
+    await releaseReservation(userId, projectId, estimatedTokens);
+    throw err;
+  }
 }

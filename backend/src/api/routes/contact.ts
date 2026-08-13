@@ -43,7 +43,12 @@ contactRouter.post("/contact/demo-request", demoRequestLimiter, async (req, res)
       return res.status(400).json({ success: false, error: "Enter a valid email address." });
     }
 
-    await sendDemoRequestEmails({
+    // Respond as soon as the request is validated — a slow/misconfigured
+    // SMTP provider must not hang the visitor's form submission. Any send
+    // failure is logged server-side rather than surfaced to the client.
+    res.json({ success: true });
+
+    sendDemoRequestEmails({
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.trim(),
@@ -51,11 +56,11 @@ contactRouter.post("/contact/demo-request", demoRequestLimiter, async (req, res)
       website: website?.trim() || undefined,
       problem: problem?.trim() || undefined,
       context: typeof context === "string" ? context : undefined,
+    }).catch((err: any) => {
+      console.error("[Contact] Failed to send demo request emails:", err.message);
     });
-
-    res.json({ success: true });
   } catch (err: any) {
-    console.error("[Contact] Failed to send demo request emails:", err.message);
+    console.error("[Contact] Failed to process demo request:", err.message);
     res.status(500).json({
       success: false,
       error: "Couldn't send your request right now. Please try again or email hello@starox.space directly.",

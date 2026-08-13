@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
+import SubscribeModal from "@/components/blog/SubscribeModal";
 
 const socials = [
   {
@@ -60,6 +62,8 @@ const legalLinks = [
 // Used on the STAROX Intelligence landing page and standalone public pages
 // (Privacy Policy, Terms of Service) so the legal links stay in one place.
 export default function Footer() {
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
+
   return (
     <footer className="border-t border-border/50">
       {/* Social bar */}
@@ -71,6 +75,12 @@ export default function Footer() {
           >
             Follow our blog
           </Link>
+          <button
+            onClick={() => setSubscribeOpen(true)}
+            className="text-sm text-muted-foreground hover:text-foreground font-medium shrink-0 transition-colors"
+          >
+            Subscribe
+          </button>
           <div className="w-px h-4 bg-border/60" />
           <div className="flex items-center gap-4">
             {socials.map((s) => (
@@ -109,6 +119,8 @@ export default function Footer() {
           ))}
         </div>
       </div>
+
+      <SubscribeModal open={subscribeOpen} onOpenChange={setSubscribeOpen} />
     </footer>
   );
 }

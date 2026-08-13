@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { usePmxStore, getPmxHeaders } from "@/lib/pmxStore";
+import { usePmxStore, getPmxHeaders, type PmxDepartment } from "@/lib/pmxStore";
+import { DEPARTMENT_COLORS } from "@/lib/pmxExecutionHealth";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -13,7 +14,8 @@ import {
   ClipboardCheck,
   Award,
   Database,
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { generatePdfBlob } from "@/lib/pdf/PmxDocumentPdf";
@@ -21,9 +23,25 @@ import { generatePdfBlob } from "@/lib/pdf/PmxDocumentPdf";
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
 
 export default function PmxArtifacts() {
-  const { artifacts, fetchArtifacts, inputs, loading, projectId } = usePmxStore();
+  const { artifacts, fetchArtifacts, inputs, loading, projectId, executionPlan, fetchExecutionPlan } = usePmxStore();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  // While a "Create Execution"/"Regenerate Execution" run is still
+  // generating department artifacts in the background, poll for progress so
+  // the list here fills in without a manual refresh.
+  useEffect(() => {
+    if (executionPlan?.artifactsStatus !== "generating") return;
+    const interval = setInterval(() => {
+      fetchExecutionPlan();
+      fetchArtifacts();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [executionPlan?.artifactsStatus, fetchExecutionPlan, fetchArtifacts]);
+
+  const artifactJobs = executionPlan?.artifactJobs || [];
+  const doneJobs = artifactJobs.filter(j => j.status === "done").length;
+  const isGeneratingArtifacts = executionPlan?.artifactsStatus === "generating";
 
   const [isAdding, setIsAdding] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<any>(null);
@@ -170,9 +188,17 @@ export default function PmxArtifacts() {
           </button>
         </div>
 
+        {isGeneratingArtifacts && (
+          <div className="flex items-center gap-2 rounded-lg border border-sky-500/20 bg-sky-500/5 px-2.5 py-2 text-[10px] text-sky-400">
+            <Loader2 className="h-3 w-3 animate-spin shrink-0" />
+            <span>Generating {doneJobs} of {artifactJobs.length} artifacts…</span>
+          </div>
+        )}
+
         <div className="space-y-1">
           {artifacts.map((doc) => {
             const active = selectedDoc?._id === doc._id;
+            const deptColor = doc.department ? DEPARTMENT_COLORS[doc.department as PmxDepartment] : null;
             return (
               <button
                 key={doc._id}
@@ -180,7 +206,7 @@ export default function PmxArtifacts() {
                   setSelectedDoc(doc);
                   setIsAdding(false);
                 }}
-                className={`w-full text-left p-2.5 rounded-lg border text-xs flex justify-between items-center transition-colors ${
+                className={`w-full text-left p-2.5 rounded-lg border text-xs flex justify-between items-center gap-2 transition-colors ${
                   active
                     ? "bg-primary/10 border-primary/20 text-foreground font-medium"
                     : "bg-transparent border-transparent text-muted-foreground hover:bg-muted/40"
@@ -190,12 +216,19 @@ export default function PmxArtifacts() {
                   <FileText className={`h-4 w-4 shrink-0 ${active ? "text-primary" : "text-muted-foreground"}`} />
                   <span className="truncate">{doc.title}</span>
                 </div>
-                <span className="text-[9px] text-muted-foreground uppercase font-mono">{doc.format}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {doc.department && (
+                    <span className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full border ${deptColor || "text-muted-foreground bg-muted/40 border-border/40"}`}>
+                      {doc.department}
+                    </span>
+                  )}
+                  <span className="text-[9px] text-muted-foreground uppercase font-mono">{doc.format}</span>
+                </div>
               </button>
             );
           })}
 
-          {artifacts.length === 0 && (
+          {artifacts.length === 0 && !isGeneratingArtifacts && (
             <div className="text-center py-12 text-muted-foreground text-xs">
               No artifacts compiled yet. Click compile button.
             </div>
@@ -211,7 +244,10 @@ export default function PmxArtifacts() {
             <div className="h-14 border-b border-border/50 px-6 flex items-center justify-between bg-card/20 shrink-0">
               <div>
                 <h2 className="text-xs font-bold text-foreground">{selectedDoc.title}</h2>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Type: <span className="text-foreground/70 capitalize">{selectedDoc.type.replace(/_/g, ' ')}</span></p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Type: <span className="text-foreground/70 capitalize">{selectedDoc.type.replace(/_/g, ' ')}</span>
+                  {selectedDoc.department && <> · Department: <span className="text-foreground/70">{selectedDoc.department}</span></>}
+                </p>
               </div>
 
               <div className="flex items-center gap-2">

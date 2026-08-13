@@ -15,7 +15,8 @@ import {
   Loader2,
   Calendar,
   Clock,
-  ArrowRight
+  ArrowRight,
+  Mail
 } from "lucide-react";
 import {
   ThemeCycleButton,
@@ -23,6 +24,7 @@ import {
   SharedMegaMenu
 } from "./StaroxIntelligence";
 import Footer from "@/components/Footer";
+import SubscribeModal from "@/components/blog/SubscribeModal";
 
 const CATEGORIES = ["All", "Engineering", "ML/AI", "Product", "Design", "Updates", "Guides"];
 const API_URL = (import.meta as any).env.VITE_API_URL || "http://localhost:8080/api";
@@ -169,6 +171,7 @@ export default function Blog() {
   // Authentication & Promotion states
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [promoteOpen, setPromoteOpen] = useState(false);
+  const [subscribeOpen, setSubscribeOpen] = useState(false);
   const [promoUsername, setPromoUsername] = useState("");
   const [promoPassword, setPromoPassword] = useState("");
   const [promoLoading, setPromoLoading] = useState(false);
@@ -415,6 +418,17 @@ export default function Blog() {
                 {category}
               </button>
             ))}
+          </div>
+
+          {/* Subscribe — always visible, no account required */}
+          <div className="shrink-0 pl-4 flex items-center gap-3">
+            <button
+              onClick={() => setSubscribeOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:opacity-90 transition-opacity"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              Subscribe
+            </button>
           </div>
 
           {/* Admin CMS Access */}
@@ -665,6 +679,8 @@ export default function Blog() {
 
       {/* ── Social Footer ────────────────────────────────────────── */}
       <Footer />
+
+      <SubscribeModal open={subscribeOpen} onOpenChange={setSubscribeOpen} />
 
       {/* ── Become Admin Modal ────────────────────────────────────── */}
       {promoteOpen && (

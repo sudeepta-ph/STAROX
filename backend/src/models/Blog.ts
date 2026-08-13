@@ -16,6 +16,13 @@ export interface IBlog extends Document {
   status: "draft" | "published" | "archived" | "scheduled";
   draft: boolean;
   publishedAt?: Date;
+  // Set exactly once, atomically, the first time this post's subscriber
+  // notification is claimed for sending (see notifyBlogSubscribers in
+  // services/mail.ts). Deliberately has NO schema default — absence means
+  // "never claimed", which a findOneAndUpdate($exists:false) filter relies
+  // on to guarantee at most one notification broadcast per post, even under
+  // a retried publish request.
+  notificationSentAt?: Date;
   readingTime: number;
   views: number;
   seoTitle?: string;
@@ -47,6 +54,7 @@ const BlogSchema = new Schema<IBlog>(
     status: { type: String, enum: ["draft", "published", "archived", "scheduled"], default: "draft" },
     draft: { type: Boolean, default: true },
     publishedAt: { type: Date },
+    notificationSentAt: { type: Date },
     readingTime: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
     seoTitle: { type: String },

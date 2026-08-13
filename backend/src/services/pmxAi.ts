@@ -11,6 +11,10 @@ import {
   getCombineSolutionsPrompt,
   getCompileArtifactPrompt,
   getExecutionTasksPrompt,
+  getExecutionScaffoldPrompt,
+  getCustomExecutionScaffoldPrompt,
+  getDepartmentTasksPrompt,
+  getExecutionDiffPrompt,
   getSolutionRefinePrompt,
   AI_MODEL,
   AI_MODEL_PRO,
@@ -37,6 +41,14 @@ const MAX_TOKENS_COMBINE_SOLUTIONS = 12000;
 const MAX_TOKENS_COMPILE_ARTIFACT = 10000;
 const MAX_TOKENS_REFINE_SOLUTION = 8000;
 const MAX_TOKENS_EXECUTION_TASKS = 6000;
+const MAX_TOKENS_EXECUTION_SCAFFOLD = 3500;
+// Smaller than MAX_TOKENS_EXECUTION_SCAFFOLD — no department-detection work,
+// just milestones/sprints for an already-fixed, typically small department set.
+const MAX_TOKENS_CUSTOM_EXECUTION_SCAFFOLD = 2500;
+const MAX_TOKENS_DEPARTMENT_TASKS = 5000;
+// Diff has to see the full existing task list (echoed back with real _ids)
+// plus the updated PRD, so it scales like combine/compile.
+const MAX_TOKENS_EXECUTION_DIFF = 8000;
 
 export async function generateProductUnderstanding(inputsText: string[], model: string = AI_MODEL, userId?: string, projectId?: string): Promise<any> {
   const context = inputsText.join("\n\n---\n\n");
@@ -137,6 +149,110 @@ export async function generateExecutionTasks(prd: string, techSpecs: string, mod
     const parsed = parseJsonResponse(responseText, "executionTasks", "tasks");
     return parsed.tasks ?? [];
   });
+}
+
+export interface ExecutionScaffold {
+  scopeSummary: string;
+  departments: string[];
+  milestones: Array<{ name: string; order: number; goal: string }>;
+  sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>;
+}
+
+export async function generateExecutionScaffold(prd: string, techSpecs: string, model: string = AI_MODEL_PRO, userId?: string, projectId?: string): Promise<ExecutionScaffold> {
+  const prompt = getExecutionScaffoldPrompt(prd, techSpecs);
+  return withRecoveryRetry(
+    "executionScaffold",
+    MAX_TOKENS_EXECUTION_SCAFFOLD,
+    async (reportCompletionTokens) => {
+      const responseText = await callDeepSeek(prompt, model, MAX_TOKENS_EXECUTION_SCAFFOLD, undefined, undefined, "executionScaffold", (usage) => reportCompletionTokens(usage.completion_tokens), userId, projectId);
+      return parseJsonResponse(responseText, "executionScaffold");
+    },
+    (parsed) => Array.isArray(parsed?.departments) && parsed.departments.length > 0
+  );
+}
+
+export interface CustomExecutionScaffold {
+  scopeSummary: string;
+  milestones: Array<{ name: string; order: number; goal: string }>;
+  sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>;
+}
+
+// Custom-execution counterpart to generateExecutionScaffold — no PRD, no
+// department detection (the caller already picked the departments), so this
+// is a smaller call producing just milestones/sprints scoped to that fixed
+// department set.
+export async function generateCustomExecutionScaffold(
+  name: string,
+  goal: string,
+  description: string,
+  departments: string[],
+  model: string = AI_MODEL_PRO,
+  userId?: string,
+  projectId?: string
+): Promise<CustomExecutionScaffold> {
+  const prompt = getCustomExecutionScaffoldPrompt(name, goal, description, departments);
+  return withRecoveryRetry(
+    "customExecutionScaffold",
+    MAX_TOKENS_CUSTOM_EXECUTION_SCAFFOLD,
+    async (reportCompletionTokens) => {
+      const responseText = await callDeepSeek(prompt, model, MAX_TOKENS_CUSTOM_EXECUTION_SCAFFOLD, undefined, undefined, "customExecutionScaffold", (usage) => reportCompletionTokens(usage.completion_tokens), userId, projectId);
+      return parseJsonResponse(responseText, "customExecutionScaffold");
+    },
+    (parsed) => Array.isArray(parsed?.milestones) && parsed.milestones.length > 0
+  );
+}
+
+export async function generateDepartmentTasks(
+  department: string,
+  prd: string,
+  techSpecs: string,
+  milestones: Array<{ name: string; goal: string }>,
+  sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>,
+  scopeSummary: string,
+  model: string = AI_MODEL,
+  userId?: string,
+  projectId?: string
+): Promise<any[]> {
+  const prompt = getDepartmentTasksPrompt(department, prd, techSpecs, milestones, sprints, scopeSummary);
+  return withRecoveryRetry("departmentTasks", MAX_TOKENS_DEPARTMENT_TASKS, async (reportCompletionTokens) => {
+    const responseText = await callDeepSeek(prompt, model, MAX_TOKENS_DEPARTMENT_TASKS, undefined, undefined, "departmentTasks", (usage) => reportCompletionTokens(usage.completion_tokens), userId, projectId);
+    const parsed = parseJsonResponse(responseText, "departmentTasks", "tasks");
+    return parsed.tasks ?? [];
+  });
+}
+
+export interface ExecutionDiffResult {
+  departments: string[];
+  milestones: Array<{ name: string; order: number; goal: string }>;
+  sprints: Array<{ number: number; label: string; departments: string[]; focus: string }>;
+  diff: {
+    add: any[];
+    update: Array<{ matchId: string; changes: Record<string, any>; reason?: string }>;
+    remove: string[];
+  };
+}
+
+export async function generateExecutionDiff(
+  prd: string,
+  techSpecs: string,
+  currentDepartments: string[],
+  currentMilestones: Array<{ name: string; goal: string }>,
+  currentSprints: Array<{ number: number; label: string; departments: string[]; focus: string }>,
+  existingTasksJson: string,
+  model: string = AI_MODEL_PRO,
+  userId?: string,
+  projectId?: string
+): Promise<ExecutionDiffResult> {
+  const prompt = getExecutionDiffPrompt(prd, techSpecs, currentDepartments, currentMilestones, currentSprints, existingTasksJson);
+  return withRecoveryRetry(
+    "executionDiff",
+    MAX_TOKENS_EXECUTION_DIFF,
+    async (reportCompletionTokens) => {
+      const responseText = await callDeepSeek(prompt, model, MAX_TOKENS_EXECUTION_DIFF, undefined, undefined, "executionDiff", (usage) => reportCompletionTokens(usage.completion_tokens), userId, projectId);
+      return parseJsonResponse(responseText, "executionDiff");
+    },
+    (parsed) => !!parsed?.diff
+  );
 }
 
 export interface SolutionPrdRefineResult {
