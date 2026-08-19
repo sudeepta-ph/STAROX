@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cloud Infrastructure Console</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="eyebrow">STAROX / CLOUD OPERATIONS</span>
+    <h1>Cloud Infrastructure Console</h1>
+    <p>Monitor compute, storage, networking and service health.</p>
+  </div>
+  <div class="online">● ALL REGIONS OPERATIONAL</div>
+</header>
+
+<main>
+
+  <section class="metrics">
+    <div class="card">
+      <small>COMPUTE INSTANCES</small>
+      <strong>248</strong>
+      <span>↑ 12 running today</span>
+    </div>
+    <div class="card">
+      <small>CPU UTILIZATION</small>
+      <strong>64%</strong>
+      <span>Healthy capacity</span>
+    </div>
+    <div class="card">
+      <small>STORAGE</small>
+      <strong>42.8 TB</strong>
+      <span>68% allocated</span>
+    </div>
+    <div class="card">
+      <small>NETWORK TRAFFIC</small>
+      <strong>8.4 Gb/s</strong>
+      <span>▲ 6.2% today</span>
+    </div>
+  </section>
+
+  <section class="grid">
+
+    <article class="panel wide">
+      <div class="head">
+        <div>
+          <small>INFRASTRUCTURE</small>
+          <h2>Resource Overview</h2>
+        </div>
+        <button id="refresh">↻ Refresh</button>
+      </div>
+
+      <div class="resources">
+
+        <div class="resource">
+          <div>
+            <b>Compute Cluster</b>
+            <span>Production workloads</span>
+          </div>
+          <strong>64%</strong>
+          <div class="bar"><i style="width:64%"></i></div>
+        </div>
+
+        <div class="resource">
+          <div>
+            <b>Database Cluster</b>
+            <span>Primary data services</span>
+          </div>
+          <strong>48%</strong>
+          <div class="bar"><i style="width:48%"></i></div>
+        </div>
+
+        <div class="resource">
+          <div>
+            <b>Object Storage</b>
+            <span>Files and backups</span>
+          </div>
+          <strong>68%</strong>
+          <div class="bar"><i style="width:68%"></i></div>
+        </div>
+
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="head">
+        <div>
+          <small>REGIONS</small>
+          <h2>Regional Health</h2>
+        </div>
+      </div>
+
+      <div class="region">
+        <span><i></i> US East</span>
+        <b>99.99%</b>
+      </div>
+      <div class="region">
+        <span><i></i> US West</span>
+        <b>99.97%</b>
+      </div>
+      <div class="region">
+        <span><i></i> EU West</span>
+        <b>99.99%</b>
+      </div>
+      <div class="region">
+        <span><i></i> Asia South</span>
+        <b>99.95%</b>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="head">
+        <div>
+          <small>SERVICE HEALTH</small>
+          <h2>Core Services</h2>
+        </div>
+      </div>
+
+      <div class="service"><span>API Gateway</span><b>HEALTHY</b></div>
+      <div class="service"><span>Load Balancer</span><b>HEALTHY</b></div>
+      <div class="service"><span>Auth Service</span><b>HEALTHY</b></div>
+      <div class="service"><span>Object Storage</span><b>HEALTHY</b></div>
+    </article>
+
+    <article class="panel wide">
+      <div class="head">
+        <div>
+          <small>RECENT ACTIVITY</small>
+          <h2>Infrastructure Events</h2>
+        </div>
+        <span>LIVE</span>
+      </div>
+
+      <div class="event">
+        <span class="dot blue"></span>
+        <div>
+          <b>Instance deployed</b>
+          <p>api-prod-248 · US East</p>
+        </div>
+        <time>2 min ago</time>
+      </div>
+
+      <div class="event">
+        <span class="dot green"></span>
+        <div>
+          <b>Deployment completed</b>
+          <p>payment-service v4.8.2</p>
+        </div>
+        <time>12 min ago</time>
+      </div>
+
+      <div class="event">
+        <span class="dot amber"></span>
+        <div>
+          <b>Capacity threshold reached</b>
+          <p>Storage cluster · 68%</p>
+        </div>
+        <time>24 min ago</time>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="head">
+        <div>
+          <small>ALERTS</small>
+          <h2>Attention</h2>
+        </div>
+        <b class="count">2</b>
+      </div>
+
+      <div class="alert">
+        <b>Storage capacity</b>
+        <span>Object storage reached 68%</span>
+      </div>
+
+      <div class="alert">
+        <b>Network spike</b>
+        <span>Traffic increased 14%</span>
+      </div>
+    </article>
+
+  </section>
+</main>
+
+<footer>STAROX CLOUD PLATFORM • INFRASTRUCTURE OPERATIONAL</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
