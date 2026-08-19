@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Model Evaluation Lab</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="eyebrow">STAROX / AI RESEARCH</span>
+    <h1>AI Model Evaluation Lab</h1>
+    <p>Compare model quality, benchmark results and evaluation runs.</p>
+  </div>
+  <div class="status">● EVALUATION RUNNING</div>
+</header>
+
+<main>
+
+<section class="metrics">
+  <div class="card">
+    <small>MODELS TESTED</small>
+    <strong>24</strong>
+    <span>+4 this week</span>
+  </div>
+  <div class="card">
+    <small>BEST ACCURACY</small>
+    <strong>94.8%</strong>
+    <span>Model Orion-4</span>
+  </div>
+  <div class="card">
+    <small>AVG LATENCY</small>
+    <strong>382ms</strong>
+    <span>Across benchmarks</span>
+  </div>
+  <div class="card">
+    <small>EVAL RUNS</small>
+    <strong>1,284</strong>
+    <span>98 completed</span>
+  </div>
+</section>
+
+<section class="grid">
+
+<article class="panel wide">
+  <div class="head">
+    <div>
+      <small>BENCHMARK PERFORMANCE</small>
+      <h2>Model Comparison</h2>
+    </div>
+    <button id="refresh">↻ Refresh</button>
+  </div>
+
+  <div class="models">
+
+    <div class="model">
+      <div>
+        <b>Orion-4</b>
+        <span>Production candidate</span>
+      </div>
+      <strong>94.8%</strong>
+      <div class="bar"><i style="width:94.8%"></i></div>
+    </div>
+
+    <div class="model">
+      <div>
+        <b>Atlas-3</b>
+        <span>General reasoning</span>
+      </div>
+      <strong>91.6%</strong>
+      <div class="bar"><i style="width:91.6%"></i></div>
+    </div>
+
+    <div class="model">
+      <div>
+        <b>Nova-2</b>
+        <span>Fast inference</span>
+      </div>
+      <strong>88.4%</strong>
+      <div class="bar"><i style="width:88.4%"></i></div>
+    </div>
+
+    <div class="model">
+      <div>
+        <b>Vector-1</b>
+        <span>Specialized model</span>
+      </div>
+      <strong>84.7%</strong>
+      <div class="bar"><i style="width:84.7%"></i></div>
+    </div>
+
+  </div>
+</article>
+
+<article class="panel">
+  <div class="head">
+    <div>
+      <small>EVALUATION STATUS</small>
+      <h2>Current Run</h2>
+    </div>
+  </div>
+
+  <div class="run">
+    <span>Dataset</span>
+    <b>QA-Benchmark-v4</b>
+  </div>
+  <div class="run">
+    <span>Samples</span>
+    <b>12,500</b>
+  </div>
+  <div class="run">
+    <span>Completed</span>
+    <b>86%</b>
+  </div>
+  <div class="run">
+    <span>Estimated time</span>
+    <b>04:18</b>
+  </div>
+</article>
+
+<article class="panel">
+  <div class="head">
+    <div>
+      <small>QUALITY METRICS</small>
+      <h2>Evaluation Scores</h2>
+    </div>
+  </div>
+
+  <div class="score">
+    <span>Accuracy</span>
+    <b>94.8%</b>
+  </div>
+  <div class="score">
+    <span>Precision</span>
+    <b>92.6%</b>
+  </div>
+  <div class="score">
+    <span>Recall</span>
+    <b>90.9%</b>
+  </div>
+  <div class="score">
+    <span>Safety</span>
+    <b class="green">98.2%</b>
+  </div>
+</article>
+
+<article class="panel wide">
+  <div class="head">
+    <div>
+      <small>RECENT EVALUATIONS</small>
+      <h2>Benchmark Runs</h2>
+    </div>
+    <span>LIVE</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>MODEL</th>
+        <th>DATASET</th>
+        <th>ACCURACY</th>
+        <th>LATENCY</th>
+        <th>STATUS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Orion-4</td>
+        <td>QA-Benchmark-v4</td>
+        <td>94.8%</td>
+        <td>382ms</td>
+        <td class="green">PASSED</td>
+      </tr>
+      <tr>
+        <td>Atlas-3</td>
+        <td>Reasoning-v2</td>
+        <td>91.6%</td>
+        <td>441ms</td>
+        <td class="green">PASSED</td>
+      </tr>
+      <tr>
+        <td>Nova-2</td>
+        <td>Speed-Test-v3</td>
+        <td>88.4%</td>
+        <td>198ms</td>
+        <td class="green">PASSED</td>
+      </tr>
+      <tr>
+        <td>Vector-1</td>
+        <td>Safety-v5</td>
+        <td>84.7%</td>
+        <td>520ms</td>
+        <td class="amber">REVIEW</td>
+      </tr>
+    </tbody>
+  </table>
+</article>
+
+<article class="panel">
+  <div class="head">
+    <div>
+      <small>ALERTS</small>
+      <h2>Evaluation Issues</h2>
+    </div>
+    <b class="badge">2</b>
+  </div>
+
+  <div class="alert">
+    <b>Latency above target</b>
+    <span>Vector-1 exceeded 500ms target.</span>
+  </div>
+
+  <div class="alert">
+    <b>Safety review required</b>
+    <span>Manual review pending for 24 samples.</span>
+  </div>
+</article>
+
+</section>
+</main>
+
+<footer>STAROX AI RESEARCH PLATFORM • EVALUATION LAB</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
