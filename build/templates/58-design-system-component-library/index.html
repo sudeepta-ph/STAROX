@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Design System / Component Library</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="eyebrow">STAROX / DESIGN SYSTEM</span>
+    <h1>Component Library</h1>
+  </div>
+  <div class="header-right">
+    <span class="version">v2.4.0</span>
+    <button id="themeBtn">Preview</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="search">⌕ Search components...</div>
+
+    <small>FOUNDATIONS</small>
+    <a>Colors</a>
+    <a>Typography</a>
+    <a>Spacing</a>
+    <a>Tokens</a>
+
+    <small>COMPONENTS</small>
+    <a class="active">Buttons</a>
+    <a>Inputs</a>
+    <a>Cards</a>
+    <a>Badges</a>
+    <a>Navigation</a>
+    <a>Tables</a>
+
+    <small>GUIDELINES</small>
+    <a>Accessibility</a>
+    <a>Usage</a>
+  </aside>
+
+  <main>
+    <div class="page-title">
+      <div>
+        <span class="eyebrow">COMPONENT / BUTTONS</span>
+        <h2>Buttons</h2>
+        <p>Interactive controls for actions and navigation.</p>
+      </div>
+      <span class="status">● DOCUMENTED</span>
+    </div>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h3>Variants</h3>
+          <p>Available button styles and states.</p>
+        </div>
+        <code>Button</code>
+      </div>
+
+      <div class="preview">
+        <button class="btn primary">Primary</button>
+        <button class="btn secondary">Secondary</button>
+        <button class="btn ghost">Ghost</button>
+        <button class="btn danger">Delete</button>
+        <button class="btn primary" disabled>Disabled</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <h3>Properties</h3>
+          <p>Component props and configuration.</p>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>PROP</th>
+            <th>TYPE</th>
+            <th>DEFAULT</th>
+            <th>DESCRIPTION</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>variant</td>
+            <td>string</td>
+            <td>primary</td>
+            <td>Visual button style</td>
+          </tr>
+          <tr>
+            <td>size</td>
+            <td>string</td>
+            <td>medium</td>
+            <td>Controls component height</td>
+          </tr>
+          <tr>
+            <td>disabled</td>
+            <td>boolean</td>
+            <td>false</td>
+            <td>Disables interaction</td>
+          </tr>
+          <tr>
+            <td>aria-label</td>
+            <td>string</td>
+            <td>—</td>
+            <td>Accessible label</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel tokens">
+      <div class="section-head">
+        <div>
+          <h3>Design Tokens</h3>
+          <p>Core values used across the system.</p>
+        </div>
+      </div>
+
+      <div class="token-grid">
+        <div class="token">
+          <span class="swatch dark"></span>
+          <div><b>text-primary</b><code>#111827</code></div>
+        </div>
+        <div class="token">
+          <span class="swatch light"></span>
+          <div><b>surface</b><code>#FFFFFF</code></div>
+        </div>
+        <div class="token">
+          <span class="swatch border"></span>
+          <div><b>border</b><code>#E5E7EB</code></div>
+        </div>
+        <div class="token">
+          <span class="swatch accent"></span>
+          <div><b>accent</b><code>#2563EB</code></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <aside class="inspector">
+    <small>LIVE PREVIEW</small>
+    <h3>Button</h3>
+
+    <div class="live-card">
+      <button class="btn primary" id="liveButton">Save changes</button>
+    </div>
+
+    <label>Variant</label>
+    <select id="variant">
+      <option>primary</option>
+      <option>secondary</option>
+      <option>ghost</option>
+      <option>danger</option>
+    </select>
+
+    <label>Accessibility</label>
+    <div class="access">
+      <span>✓ Keyboard accessible</span>
+      <span>✓ Visible focus state</span>
+      <span>✓ Screen-reader label</span>
+    </div>
+  </aside>
+
+</div>
+
+<footer>
+  <span>DESIGN SYSTEM • DOCUMENTATION FIRST</span>
+  <span>INTER + GEIST MONO</span>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
