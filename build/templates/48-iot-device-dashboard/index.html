@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="IoT device monitoring and telemetry dashboard">
+  <title>PulseGrid — IoT Device Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <div class="app">
+
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">P</div>
+        <div>
+          <strong>PulseGrid</strong>
+          <span>IoT Operations</span>
+        </div>
+      </div>
+
+      <nav>
+        <p class="nav-label">MONITOR</p>
+        <a class="nav-item active" href="#">⌁ <span>Overview</span></a>
+        <a class="nav-item" href="#">▦ <span>Devices</span><b>24</b></a>
+        <a class="nav-item" href="#">⌁ <span>Telemetry</span></a>
+        <a class="nav-item" href="#">⚠ <span>Alerts</span><b class="danger">3</b></a>
+
+        <p class="nav-label">MANAGE</p>
+        <a class="nav-item" href="#">◉ <span>Firmware</span></a>
+        <a class="nav-item" href="#">⌘ <span>Automations</span></a>
+        <a class="nav-item" href="#">⚙ <span>Settings</span></a>
+      </nav>
+
+      <div class="system-status">
+        <span class="status-dot"></span>
+        <div>
+          <strong>All systems operational</strong>
+          <small>Last sync 12 sec ago</small>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">FLEET / OVERVIEW</div>
+          <h1>IoT Command Center</h1>
+          <p>Real-time health and telemetry across your connected fleet.</p>
+        </div>
+
+        <div class="top-actions">
+          <button class="icon-btn" aria-label="Notifications">♢</button>
+          <button class="profile">SK</button>
+        </div>
+      </header>
+
+      <section class="kpis">
+        <article class="kpi-card">
+          <span>Total devices</span>
+          <strong>128</strong>
+          <small class="positive">↑ 8.4% this month</small>
+        </article>
+
+        <article class="kpi-card">
+          <span>Online now</span>
+          <strong>119</strong>
+          <small class="positive"><i></i> 93% fleet health</small>
+        </article>
+
+        <article class="kpi-card">
+          <span>Active alerts</span>
+          <strong>03</strong>
+          <small class="warning">2 require attention</small>
+        </article>
+
+        <article class="kpi-card">
+          <span>Avg. temperature</span>
+          <strong>24.8°</strong>
+          <small>Last 24 hours</small>
+        </article>
+      </section>
+
+      <section class="content-grid">
+
+        <article class="panel telemetry-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">LIVE TELEMETRY</span>
+              <h2>Temperature & humidity</h2>
+            </div>
+
+            <div class="range-buttons">
+              <button class="active">24H</button>
+              <button>7D</button>
+              <button>30D</button>
+            </div>
+          </div>
+
+          <div class="chart-wrap">
+            <div class="y-axis">
+              <span>40°</span>
+              <span>30°</span>
+              <span>20°</span>
+              <span>10°</span>
+            </div>
+
+            <div class="chart">
+              <div class="grid-line line-1"></div>
+              <div class="grid-line line-2"></div>
+              <div class="grid-line line-3"></div>
+              <div class="grid-line line-4"></div>
+
+              <svg viewBox="0 0 800 260" preserveAspectRatio="none" aria-label="Temperature telemetry chart">
+                <defs>
+                  <linearGradient id="area" x1="0" x2="0" y1="0" y2="1">
+                    <stop offset="0%" stop-color="#06B6D4" stop-opacity=".28"/>
+                    <stop offset="100%" stop-color="#06B6D4" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+
+                <path class="area"
+                  d="M0,175 C55,145 80,165 125,125 S205,135 250,105 S330,145 375,115 S455,70 500,105 S570,85 620,115 S700,55 800,80 L800,260 L0,260 Z"/>
+
+                <path class="line"
+                  d="M0,175 C55,145 80,165 125,125 S205,135 250,105 S330,145 375,115 S455,70 500,105 S570,85 620,115 S700,55 800,80"/>
+              </svg>
+
+              <div class="tooltip">
+                <strong>24.8°C</strong>
+                <span>Today · 14:42</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="chart-footer">
+            <span><i class="legend temp"></i> Temperature</span>
+            <span><i class="legend humidity"></i> Humidity 48%</span>
+            <span class="mono">LIVE • 2.4s latency</span>
+          </div>
+        </article>
+
+        <article class="panel alerts-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">ATTENTION</span>
+              <h2>Active alerts</h2>
+            </div>
+            <button class="text-btn">View all →</button>
+          </div>
+
+          <div class="alert">
+            <div class="alert-icon red">!</div>
+            <div>
+              <strong>High temperature</strong>
+              <p>Sensor-RM204 · 39.4°C</p>
+              <small>4 min ago</small>
+            </div>
+            <span class="severity high">HIGH</span>
+          </div>
+
+          <div class="alert">
+            <div class="alert-icon amber">!</div>
+            <div>
+              <strong>Battery low</strong>
+              <p>Tracker-F12 · 12% remaining</p>
+              <small>18 min ago</small>
+            </div>
+            <span class="severity medium">MED</span>
+          </div>
+
+          <div class="alert">
+            <div class="alert-icon blue">↻</div>
+            <div>
+              <strong>Firmware update</strong>
+              <p>Gateway-07 · Update ready</p>
+              <small>32 min ago</small>
+            </div>
+            <span class="severity info">INFO</span>
+          </div>
+        </article>
+
+      </section>
+
+      <section class="devices-section">
+        <div class="section-head">
+          <div>
+            <span class="panel-kicker">DEVICE FLEET</span>
+            <h2>Connected devices</h2>
+          </div>
+
+          <div class="filters">
+            <button class="filter active">All <span>128</span></button>
+            <button class="filter">Online <span>119</span></button>
+            <button class="filter">Offline <span>9</span></button>
+            <button class="add-btn">+ Add device</button>
+          </div>
+        </div>
+
+        <div class="device-grid">
+
+          <article class="device-card">
+            <div class="device-top">
+              <div class="device-symbol">◈</div>
+              <span class="online">ONLINE</span>
+            </div>
+            <h3>Gateway-01</h3>
+            <p>Central Gateway · Floor 1</p>
+            <div class="device-metrics">
+              <span>CPU <strong>32%</strong></span>
+              <span>MEM <strong>61%</strong></span>
+              <span>24.2°C</span>
+            </div>
+            <footer>
+              <span class="mono">v4.8.2</span>
+              <button>•••</button>
+            </footer>
+          </article>
+
+          <article class="device-card">
+            <div class="device-top">
+              <div class="device-symbol">◇</div>
+              <span class="online">ONLINE</span>
+            </div>
+            <h3>Sensor-RM204</h3>
+            <p>Temperature · Room 204</p>
+            <div class="device-metrics">
+              <span>TEMP <strong>39.4°C</strong></span>
+              <span>HUM <strong>42%</strong></span>
+              <span>RSSI -61</span>
+            </div>
+            <footer>
+              <span class="mono">v2.1.0</span>
+              <button>•••</button>
+            </footer>
+          </article>
+
+          <article class="device-card">
+            <div class="device-top">
+              <div class="device-symbol">◉</div>
+              <span class="online">ONLINE</span>
+            </div>
+            <h3>Tracker-F12</h3>
+            <p>Asset Tracker · Warehouse</p>
+            <div class="device-metrics">
+              <span>BAT <strong>12%</strong></span>
+              <span>RSSI <strong>-48</strong></span>
+              <span>4.2 km</span>
+            </div>
+            <footer>
+              <span class="mono">v3.4.1</span>
+              <button>•••</button>
+            </footer>
+          </article>
+
+          <article class="device-card offline-card">
+            <div class="device-top">
+              <div class="device-symbol">◇</div>
+              <span class="offline">OFFLINE</span>
+            </div>
+            <h3>Gateway-07</h3>
+            <p>Central Gateway · Floor 3</p>
+            <div class="device-metrics">
+              <span>LAST <strong>2h ago</strong></span>
+              <span>RSSI <strong>—</strong></span>
+              <span>24.1°C</span>
+            </div>
+            <footer>
+              <span class="mono">v4.7.9</span>
+              <button>•••</button>
+            </footer>
+          </article>
+
+        </div>
+      </section>
+
+      <footer class="page-footer">
+        <span>PulseGrid IoT Platform</span>
+        <span class="mono">API STATUS: OPERATIONAL</span>
+      </footer>
+
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
