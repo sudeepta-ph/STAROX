@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG Knowledge System</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="eyebrow">STAROX / KNOWLEDGE INTELLIGENCE</span>
+    <h1>RAG Knowledge System</h1>
+    <p>Search documents, inspect sources and retrieve grounded answers.</p>
+  </div>
+  <div class="status">● INDEX HEALTHY</div>
+</header>
+
+<main>
+
+  <section class="search-panel">
+    <div class="search-box">
+      <span>⌕</span>
+      <input id="search" type="text" placeholder="Ask a question or search the knowledge base...">
+      <button id="ask">Ask</button>
+    </div>
+
+    <div class="suggestions">
+      <button>What changed in the latest policy?</button>
+      <button>Summarize onboarding requirements</button>
+      <button>Find security guidelines</button>
+    </div>
+  </section>
+
+  <section class="stats">
+    <div class="card">
+      <small>DOCUMENTS</small>
+      <strong>12,842</strong>
+      <span>+124 this week</span>
+    </div>
+
+    <div class="card">
+      <small>CHUNKS INDEXED</small>
+      <strong>248K</strong>
+      <span>98.7% coverage</span>
+    </div>
+
+    <div class="card">
+      <small>RETRIEVAL ACCURACY</small>
+      <strong>94.2%</strong>
+      <span>▲ 3.8%</span>
+    </div>
+
+    <div class="card">
+      <small>AVG RESPONSE</small>
+      <strong>1.8s</strong>
+      <span>Healthy latency</span>
+    </div>
+  </section>
+
+  <section class="grid">
+
+    <article class="panel answer">
+      <div class="head">
+        <div>
+          <small>GENERATED ANSWER</small>
+          <h2>Knowledge Response</h2>
+        </div>
+        <span>GROUNDED</span>
+      </div>
+
+      <p class="answer-text">
+        The latest onboarding policy requires employees to complete identity
+        verification, security training and access approval before receiving
+        production credentials.
+      </p>
+
+      <div class="confidence">
+        <span>Confidence</span>
+        <b>96%</b>
+        <div><i style="width:96%"></i></div>
+      </div>
+
+      <div class="sources-title">Cited sources</div>
+
+      <div class="source">
+        <span class="file">PDF</span>
+        <div>
+          <b>Employee Onboarding Policy.pdf</b>
+          <small>Page 4 · Section 2.1</small>
+        </div>
+        <span class="score">0.96</span>
+      </div>
+
+      <div class="source">
+        <span class="file">DOC</span>
+        <div>
+          <b>Security Access Guidelines.docx</b>
+          <small>Page 7 · Access controls</small>
+        </div>
+        <span class="score">0.91</span>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="head">
+        <div>
+          <small>RETRIEVAL</small>
+          <h2>Top Chunks</h2>
+        </div>
+        <span>TOP 5</span>
+      </div>
+
+      <div class="chunk">
+        <b>Onboarding requirements</b>
+        <span>Policy · 0.96 relevance</span>
+      </div>
+
+      <div class="chunk">
+        <b>Security training</b>
+        <span>Guidelines · 0.91 relevance</span>
+      </div>
+
+      <div class="chunk">
+        <b>Access approval flow</b>
+        <span>Operations · 0.87 relevance</span>
+      </div>
+
+      <div class="chunk">
+        <b>Production credentials</b>
+        <span>Security · 0.82 relevance</span>
+      </div>
+    </article>
+
+    <article class="panel wide">
+      <div class="head">
+        <div>
+          <small>KNOWLEDGE BASE</small>
+          <h2>Recent Documents</h2>
+        </div>
+        <button id="refresh">↻ Refresh</button>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>DOCUMENT</th>
+            <th>TYPE</th>
+            <th>CHUNKS</th>
+            <th>UPDATED</th>
+            <th>STATUS</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <tr>
+            <td>Employee Onboarding Policy</td>
+            <td>PDF</td>
+            <td>184</td>
+            <td>8 min ago</td>
+            <td class="green">INDEXED</td>
+          </tr>
+
+          <tr>
+            <td>Security Access Guidelines</td>
+            <td>DOCX</td>
+            <td>96</td>
+            <td>22 min ago</td>
+            <td class="green">INDEXED</td>
+          </tr>
+
+          <tr>
+            <td>Engineering Handbook</td>
+            <td>PDF</td>
+            <td>412</td>
+            <td>1 hour ago</td>
+            <td class="green">INDEXED</td>
+          </tr>
+
+          <tr>
+            <td>Product Requirements Q3</td>
+            <td>PDF</td>
+            <td>238</td>
+            <td>2 hours ago</td>
+            <td class="amber">PROCESSING</td>
+          </tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="panel">
+      <div class="head">
+        <div>
+          <small>INDEX STATUS</small>
+          <h2>Pipeline Health</h2>
+        </div>
+        <span>98.7%</span>
+      </div>
+
+      <div class="health">
+        <div><span>Documents</span><b>12,842</b></div>
+        <div><span>Embedded</span><b>12,806</b></div>
+        <div><span>Failed</span><b class="red">36</b></div>
+        <div><span>Vector DB</span><b class="green">ONLINE</b></div>
+      </div>
+    </article>
+
+  </section>
+</main>
+
+<footer>STAROX KNOWLEDGE PLATFORM • RETRIEVAL SYSTEM OPERATIONAL</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
