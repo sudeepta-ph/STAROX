@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logistics Control Tower</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Logistics Control Tower</h1>
+    <p>Real-time fleet, shipment and route monitoring</p>
+  </div>
+  <div class="online">● SYSTEM ONLINE</div>
+</header>
+
+<main>
+
+  <section class="stats">
+    <div class="stat">
+      <span>🚚</span>
+      <div>
+        <p>Active Fleet</p>
+        <h2>128</h2>
+      </div>
+    </div>
+
+    <div class="stat">
+      <span>📦</span>
+      <div>
+        <p>Shipments</p>
+        <h2>1,284</h2>
+      </div>
+    </div>
+
+    <div class="stat">
+      <span>⏱️</span>
+      <div>
+        <p>On-Time ETA</p>
+        <h2>94.8%</h2>
+      </div>
+    </div>
+
+    <div class="stat">
+      <span>🛣️</span>
+      <div>
+        <p>Active Routes</p>
+        <h2>46</h2>
+      </div>
+    </div>
+  </section>
+
+  <section class="dashboard">
+
+    <div class="map-card">
+      <div class="section-title">
+        <div>
+          <h2>Live Route Map</h2>
+          <p>Fleet locations and active routes</p>
+        </div>
+        <span class="live">LIVE</span>
+      </div>
+
+      <div class="map">
+        <div class="route route-one"></div>
+        <div class="route route-two"></div>
+        <div class="route route-three"></div>
+
+        <div class="vehicle v1">🚚</div>
+        <div class="vehicle v2">🚚</div>
+        <div class="vehicle v3">🚚</div>
+
+        <div class="city city1">Bengaluru</div>
+        <div class="city city2">Mumbai</div>
+        <div class="city city3">Chennai</div>
+      </div>
+    </div>
+
+    <div class="alerts">
+      <div class="section-title">
+        <div>
+          <h2>Alerts</h2>
+          <p>Requires attention</p>
+        </div>
+        <span class="alert-count">3</span>
+      </div>
+
+      <div class="alert critical">
+        <strong>⚠ Route Delay</strong>
+        <p>Shipment SH-2048 delayed by 32 minutes.</p>
+      </div>
+
+      <div class="alert warning">
+        <strong>⚠ Traffic Warning</strong>
+        <p>Heavy traffic detected on Route R-18.</p>
+      </div>
+
+      <div class="alert info">
+        <strong>ℹ Vehicle Update</strong>
+        <p>Vehicle FL-092 requires maintenance.</p>
+      </div>
+    </div>
+
+  </section>
+
+  <section class="shipments">
+    <div class="section-title">
+      <div>
+        <h2>Shipment Tracking</h2>
+        <p>Current shipment status and estimated arrival</p>
+      </div>
+      <button id="refreshBtn">↻ Refresh</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Shipment</th>
+            <th>Vehicle</th>
+            <th>Route</th>
+            <th>Status</th>
+            <th>ETA</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          <tr>
+            <td><strong>SH-2048</strong></td>
+            <td>FL-092</td>
+            <td>Bengaluru → Mumbai</td>
+            <td><span class="badge delayed">Delayed</span></td>
+            <td>18:45</td>
+          </tr>
+
+          <tr>
+            <td><strong>SH-2051</strong></td>
+            <td>FL-117</td>
+            <td>Chennai → Bengaluru</td>
+            <td><span class="badge transit">In Transit</span></td>
+            <td>16:20</td>
+          </tr>
+
+          <tr>
+            <td><strong>SH-2063</strong></td>
+            <td>FL-143</td>
+            <td>Mumbai → Pune</td>
+            <td><span class="badge transit">In Transit</span></td>
+            <td>15:10</td>
+          </tr>
+
+          <tr>
+            <td><strong>SH-2072</strong></td>
+            <td>FL-088</td>
+            <td>Delhi → Jaipur</td>
+            <td><span class="badge delivered">On Time</span></td>
+            <td>19:30</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script src="script.js"></script>
+</body>
+</html>
