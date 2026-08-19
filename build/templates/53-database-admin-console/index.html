@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Database Admin Console</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="eyebrow">STAROX / DATABASE</span>
+    <h1>Database Admin Console</h1>
+    <p>Monitor databases, queries, connections and system health.</p>
+  </div>
+  <span class="online">● ALL SYSTEMS OPERATIONAL</span>
+</header>
+
+<main>
+  <section class="metrics">
+    <div class="card"><small>DATABASES</small><strong>12</strong><span>All healthy</span></div>
+    <div class="card"><small>ACTIVE CONNECTIONS</small><strong>284</strong><span>61% capacity</span></div>
+    <div class="card"><small>QUERIES / SEC</small><strong>1,842</strong><span>▲ 8.2%</span></div>
+    <div class="card"><small>AVG LATENCY</small><strong>42ms</strong><span>▼ 6ms</span></div>
+  </section>
+
+  <section class="grid">
+
+    <article class="panel databases">
+      <div class="head">
+        <div><small>DATABASE INSTANCES</small><h2>Database Overview</h2></div>
+        <button id="refresh">↻ Refresh</button>
+      </div>
+
+      <div class="db">
+        <div><i class="green"></i><div><b>production-db</b><span>PostgreSQL · us-east-1</span></div></div>
+        <strong>HEALTHY</strong>
+      </div>
+
+      <div class="db">
+        <div><i class="green"></i><div><b>analytics-db</b><span>PostgreSQL · us-west-2</span></div></div>
+        <strong>HEALTHY</strong>
+      </div>
+
+      <div class="db">
+        <div><i class="amber"></i><div><b>staging-db</b><span>MySQL · ap-south-1</span></div></div>
+        <strong class="amber-text">WARNING</strong>
+      </div>
+
+      <div class="db">
+        <div><i class="green"></i><div><b>users-db</b><span>MongoDB · eu-west-1</span></div></div>
+        <strong>HEALTHY</strong>
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="head">
+        <div><small>RESOURCE UTILIZATION</small><h2>System Load</h2></div>
+      </div>
+
+      <div class="resource"><span>CPU</span><b>62%</b><div><i style="width:62%"></i></div></div>
+      <div class="resource"><span>Memory</span><b>74%</b><div><i style="width:74%"></i></div></div>
+      <div class="resource"><span>Storage</span><b>48%</b><div><i style="width:48%"></i></div></div>
+      <div class="resource"><span>Connections</span><b>61%</b><div><i style="width:61%"></i></div></div>
+    </article>
+
+    <article class="panel wide">
+      <div class="head">
+        <div><small>QUERY ACTIVITY</small><h2>Recent Queries</h2></div>
+        <span>LIVE</span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>QUERY</th>
+            <th>DATABASE</th>
+            <th>USER</th>
+            <th>DURATION</th>
+            <th>STATUS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>SELECT * FROM orders</td><td>production-db</td><td>api-service</td><td>24ms</td><td class="ok">SUCCESS</td></tr>
+          <tr><td>UPDATE customer SET...</td><td>users-db</td><td>admin</td><td>38ms</td><td class="ok">SUCCESS</td></tr>
+          <tr><td>SELECT COUNT(*) FROM events</td><td>analytics-db</td><td>reporting</td><td>142ms</td><td class="warn">SLOW</td></tr>
+          <tr><td>INSERT INTO sessions...</td><td>production-db</td><td>auth-service</td><td>18ms</td><td class="ok">SUCCESS</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article class="panel">
+      <div class="head"><div><small>ALERTS</small><h2>System Alerts</h2></div><b class="badge">2</b></div>
+      <div class="alert"><b>High memory usage</b><span>staging-db · 74%</span></div>
+      <div class="alert"><b>Slow query detected</b><span>analytics-db · 142ms</span></div>
+    </article>
+
+    <article class="panel">
+      <div class="head"><div><small>BACKUPS</small><h2>Latest Backups</h2></div></div>
+      <div class="backup"><span>production-db</span><b>Completed</b><small>14 min ago</small></div>
+      <div class="backup"><span>analytics-db</span><b>Completed</b><small>32 min ago</small></div>
+      <div class="backup"><span>users-db</span><b>Completed</b><small>48 min ago</small></div>
+    </article>
+
+  </section>
+</main>
+
+<footer>STAROX DATABASE PLATFORM • ADMIN CONSOLE</footer>
+<script src="script.js"></script>
+</body>
+</html>
