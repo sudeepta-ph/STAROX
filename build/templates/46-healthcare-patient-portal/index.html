@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Healthcare Patient Portal" />
+  <title>CarePortal | Patient Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">CarePortal</div>
+    <div class="user">👤 Alex Morgan</div>
+  </header>
+
+  <main class="container">
+    <section class="welcome">
+      <div>
+        <p class="eyebrow">PATIENT PORTAL</p>
+        <h1>Good morning, Alex</h1>
+        <p>Manage your appointments, medical records and prescriptions.</p>
+      </div>
+      <button onclick="bookAppointment()">+ Book appointment</button>
+    </section>
+
+    <section class="summary">
+      <article>
+        <span>Next appointment</span>
+        <strong>Dr. Sarah Wilson</strong>
+        <p>Today · 10:30 AM</p>
+      </article>
+
+      <article>
+        <span>Prescriptions</span>
+        <strong>3 Active</strong>
+        <p>2 refills available</p>
+      </article>
+
+      <article>
+        <span>Messages</span>
+        <strong>2 Unread</strong>
+        <p>From your care team</p>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="card-title">
+          <h2>Upcoming appointment</h2>
+          <button class="link" onclick="bookAppointment()">View all</button>
+        </div>
+        <div class="appointment">
+          <div class="avatar">SW</div>
+          <div>
+            <strong>Dr. Sarah Wilson</strong>
+            <p>General Medicine</p>
+            <p>Today · 10:30 AM · Room 204</p>
+          </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-title">
+          <h2>Medical records</h2>
+          <button class="link">View records</button>
+        </div>
+        <ul class="records">
+          <li><span>Blood Test</span><small>12 Aug 2026</small></li>
+          <li><span>Annual Checkup</span><small>02 Aug 2026</small></li>
+          <li><span>Vaccination Record</span><small>18 Jul 2026</small></li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <div class="card-title">
+          <h2>Prescriptions</h2>
+          <button class="link">View all</button>
+        </div>
+        <ul class="records">
+          <li><span>Amoxicillin 500mg</span><small>5 days left</small></li>
+          <li><span>Vitamin D3</span><small>20 days left</small></li>
+          <li><span>Paracetamol 500mg</span><small>As needed</small></li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <div class="card-title">
+          <h2>Messages</h2>
+          <button class="link">Open inbox</button>
+        </div>
+        <div class="message">
+          <strong>Care Team</strong>
+          <p>Your lab results are ready to view.</p>
+        </div>
+        <div class="message">
+          <strong>Dr. Wilson</strong>
+          <p>Your follow-up appointment is confirmed.</p>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer>© 2026 CarePortal · Your health, organized.</footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
