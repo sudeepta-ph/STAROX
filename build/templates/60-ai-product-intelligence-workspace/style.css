@@ -1,0 +1,367 @@
+*{
+  box-sizing:border-box;
+  margin:0;
+  padding:0
+}
+
+body{
+  background:#08090b;
+  color:#e8edf5;
+  font-family:Inter,Arial,sans-serif;
+  min-height:100vh
+}
+
+header{
+  height:72px;
+  padding:0 28px;
+  border-bottom:1px solid #222831;
+  background:#0b0d10;
+  display:flex;
+  align-items:center;
+  justify-content:space-between
+}
+
+.eyebrow,small,footer,.updated,
+.panel-head>span{
+  color:#6f7785;
+  font:9px "Geist Mono","Courier New",monospace;
+  letter-spacing:.08em
+}
+
+h1{
+  font-size:19px;
+  margin-top:5px
+}
+
+.header-actions{
+  display:flex;
+  align-items:center;
+  gap:16px
+}
+
+.live{
+  color:#2a8af0;
+  font:9px "Geist Mono",monospace
+}
+
+.header-actions button,
+.small-btn{
+  border:1px solid #2a8af0;
+  background:#0d1826;
+  color:#58a9ff;
+  border-radius:5px;
+  padding:8px 12px;
+  font-size:10px;
+  cursor:pointer
+}
+
+.layout{
+  display:grid;
+  grid-template-columns:210px 1fr;
+  min-height:calc(100vh - 112px)
+}
+
+.sidebar{
+  background:#0b0d10;
+  border-right:1px solid #222831;
+  padding:22px 14px
+}
+
+.project{
+  margin:12px 0 24px;
+  padding:10px;
+  background:#111318;
+  border:1px solid #222831;
+  border-radius:5px;
+  font-size:11px
+}
+
+nav a{
+  display:block;
+  padding:10px 11px;
+  margin:3px 0;
+  color:#737b89;
+  font-size:11px;
+  border-radius:5px;
+  cursor:pointer
+}
+
+nav a:hover,
+nav .active{
+  background:#111b28;
+  color:#58a9ff
+}
+
+.context{
+  border-top:1px solid #222831;
+  margin-top:28px;
+  padding-top:18px
+}
+
+.context p{
+  color:#69717e;
+  font-size:10px;
+  margin-top:10px
+}
+
+main{
+  width:100%;
+  max-width:1250px;
+  padding:28px 30px
+}
+
+.hero{
+  background:#0d1014;
+  border:1px solid #222831;
+  border-radius:7px;
+  padding:22px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:14px
+}
+
+.hero h2{
+  font-size:21px;
+  margin:7px 0
+}
+
+.hero p{
+  color:#737b89;
+  font-size:11px
+}
+
+.stats{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:12px;
+  margin-bottom:14px
+}
+
+.stat,.panel{
+  background:#0d1014;
+  border:1px solid #222831;
+  border-radius:7px
+}
+
+.stat{
+  padding:17px
+}
+
+.stat strong{
+  display:block;
+  font:24px "Geist Mono",monospace;
+  margin:8px 0 4px
+}
+
+.stat span{
+  color:#2a8af0;
+  font:9px "Geist Mono",monospace
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1.25fr;
+  gap:14px
+}
+
+.panel{
+  padding:18px
+}
+
+.panel-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:15px
+}
+
+.panel-head h3{
+  font-size:14px;
+  margin-top:6px
+}
+
+.badge{
+  color:#2a8af0!important;
+  background:#0d1826;
+  padding:5px 7px;
+  border-radius:4px
+}
+
+.source,
+.insight,
+.prd-row,
+.activity-row{
+  display:flex;
+  align-items:center;
+  gap:11px;
+  padding:13px 0;
+  border-bottom:1px solid #20252c
+}
+
+.source:last-child,
+.insight:last-child,
+.prd-row:last-child{
+  border-bottom:0
+}
+
+.source-icon{
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  background:#111318;
+  border:1px solid #252b34;
+  border-radius:5px;
+  color:#2a8af0
+}
+
+.source div:nth-child(2),
+.insight div:nth-child(2),
+.prd-row div{
+  flex:1
+}
+
+.source b,
+.insight b,
+.prd-row b{
+  font-size:11px
+}
+
+.source p,
+.insight p,
+.prd-row p{
+  color:#68717f;
+  font-size:9px;
+  margin-top:4px
+}
+
+.source em,
+.ready,
+.review,
+.draft{
+  font:8px "Geist Mono",monospace;
+  font-style:normal
+}
+
+.source em,
+.ready{
+  color:#35c98b
+}
+
+.review{
+  color:#f2b84b
+}
+
+.draft{
+  color:#6f7785
+}
+
+.priority{
+  width:4px;
+  height:35px;
+  border-radius:3px
+}
+
+.high{background:#ef5b68}
+.medium{background:#f2b84b}
+.low{background:#35c98b}
+
+.insight>span{
+  color:#58a9ff;
+  font:10px "Geist Mono",monospace
+}
+
+.number{
+  color:#555e6b;
+  font:9px "Geist Mono",monospace
+}
+
+.execution .panel-head strong{
+  color:#2a8af0;
+  font:13px "Geist Mono",monospace
+}
+
+.exec{
+  padding:12px 0
+}
+
+.exec>div:first-child{
+  display:flex;
+  justify-content:space-between;
+  font-size:10px;
+  margin-bottom:7px
+}
+
+.exec span{
+  color:#7b8491;
+  font:9px "Geist Mono",monospace
+}
+
+.bar{
+  height:5px;
+  background:#222831;
+  border-radius:4px;
+  overflow:hidden
+}
+
+.bar i{
+  display:block;
+  height:100%;
+  background:#2a8af0;
+  border-radius:4px
+}
+
+.activity{
+  margin-top:14px
+}
+
+.activity-row{
+  font-size:10px
+}
+
+.activity-row p{
+  flex:1;
+  color:#7b8491
+}
+
+.activity-row b{
+  color:#dbe3ee
+}
+
+.dot{
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:#2a8af0;
+  box-shadow:0 0 8px #2a8af0
+}
+
+time{
+  color:#555e6b;
+  font:9px "Geist Mono",monospace
+}
+
+footer{
+  height:40px;
+  border-top:1px solid #222831;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 25px;
+  background:#0b0d10
+}
+
+@media(max-width:900px){
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .grid{grid-template-columns:1fr}
+}
+
+@media(max-width:650px){
+  .layout{grid-template-columns:1fr}
+  .sidebar{display:none}
+  main{padding:18px}
+  .stats{grid-template-columns:1fr 1fr}
+  .hero{display:block}
+  .updated{display:block;margin-top:15px}
+}
