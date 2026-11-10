@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Home Control</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div>
+      <h1>Smart Home</h1>
+      <p>Control your home, wherever you are.</p>
+    </div>
+    <div class="status">● All systems online</div>
+  </header>
+
+  <main>
+    <section class="summary">
+      <div class="card">
+        <span>🏠</span>
+        <h3>Home Status</h3>
+        <strong>Secure</strong>
+      </div>
+      <div class="card">
+        <span>🌡️</span>
+        <h3>Temperature</h3>
+        <strong>24°C</strong>
+      </div>
+      <div class="card">
+        <span>💡</span>
+        <h3>Lights</h3>
+        <strong id="lightCount">3 On</strong>
+      </div>
+      <div class="card">
+        <span>🔒</span>
+        <h3>Security</h3>
+        <strong>Armed</strong>
+      </div>
+    </section>
+
+    <section>
+      <h2>Devices</h2>
+
+      <div class="devices">
+        <div class="device">
+          <div class="device-icon">💡</div>
+          <div>
+            <h3>Living Room Lights</h3>
+            <p>Living Room</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked>
+            <span></span>
+          </label>
+        </div>
+
+        <div class="device">
+          <div class="device-icon">❄️</div>
+          <div>
+            <h3>Air Conditioner</h3>
+            <p>Bedroom · 24°C</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked>
+            <span></span>
+          </label>
+        </div>
+
+        <div class="device">
+          <div class="device-icon">📺</div>
+          <div>
+            <h3>Smart TV</h3>
+            <p>Living Room</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox">
+            <span></span>
+          </label>
+        </div>
+
+        <div class="device">
+          <div class="device-icon">🔒</div>
+          <div>
+            <h3>Front Door Lock</h3>
+            <p>Entrance · Locked</p>
+          </div>
+          <label class="switch">
+            <input type="checkbox" checked>
+            <span></span>
+          </label>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
