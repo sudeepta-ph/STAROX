@@ -1,0 +1,270 @@
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#090d13;
+  color:#e7edf5;
+  font-family:Inter,Arial,sans-serif;
+  min-height:100vh
+}
+
+header{
+  padding:28px 42px;
+  background:#0d141d;
+  border-bottom:1px solid #273443;
+  display:flex;
+  justify-content:space-between;
+  align-items:center
+}
+
+.eyebrow,small,footer,.head>span{
+  font:10px "Courier New",monospace;
+  color:#748396;
+  letter-spacing:.08em
+}
+
+h1{font-size:28px;margin:7px 0}
+header p{color:#8290a0;font-size:13px}
+.status{color:#35d399;font:11px monospace}
+
+main{width:90%;max-width:1350px;margin:28px auto}
+
+.search-panel{
+  background:#111923;
+  border:1px solid #293747;
+  border-radius:8px;
+  padding:18px;
+  margin-bottom:18px
+}
+
+.search-box{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  background:#0a1017;
+  border:1px solid #314050;
+  padding:6px 8px;
+  border-radius:6px
+}
+
+.search-box>span{
+  color:#8190a1;
+  font-size:20px
+}
+
+input{
+  flex:1;
+  background:none;
+  border:0;
+  outline:0;
+  color:#fff;
+  padding:9px
+}
+
+button{
+  background:#172534;
+  color:#b9c7d5;
+  border:1px solid #354658;
+  padding:8px 12px;
+  border-radius:5px;
+  cursor:pointer
+}
+
+.suggestions{
+  display:flex;
+  gap:8px;
+  margin-top:12px;
+  flex-wrap:wrap
+}
+
+.suggestions button{
+  font-size:10px;
+  color:#8493a3
+}
+
+.stats{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:15px;
+  margin-bottom:18px
+}
+
+.card,.panel{
+  background:#111923;
+  border:1px solid #293747;
+  border-radius:7px
+}
+
+.card{padding:19px}
+
+.card strong{
+  display:block;
+  font:600 27px "Courier New",monospace;
+  margin:9px 0 5px
+}
+
+.card span{font-size:11px;color:#4ade80}
+
+.grid{
+  display:grid;
+  grid-template-columns:1.35fr 1fr;
+  gap:16px
+}
+
+.panel{padding:19px}
+.wide{grid-column:span 2}
+
+.head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:18px
+}
+
+.head h2{font-size:15px}
+
+.answer-text{
+  color:#b8c4d0;
+  font-size:13px;
+  line-height:1.7;
+  background:#0c131b;
+  padding:15px;
+  border-radius:5px
+}
+
+.confidence{
+  margin:17px 0;
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:7px;
+  font-size:11px
+}
+
+.confidence b{
+  color:#4ade80;
+  font:10px monospace
+}
+
+.confidence>div{
+  grid-column:1/-1;
+  height:5px;
+  background:#202d3a;
+  border-radius:4px;
+  overflow:hidden
+}
+
+.confidence i{
+  display:block;
+  height:100%;
+  background:#22c55e
+}
+
+.sources-title{
+  color:#718093;
+  font:10px monospace;
+  margin-bottom:9px
+}
+
+.source{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:11px 0;
+  border-bottom:1px solid #273442
+}
+
+.file{
+  background:#203243;
+  color:#67c8ed;
+  padding:6px;
+  border-radius:4px;
+  font:9px monospace
+}
+
+.source b{
+  display:block;
+  font-size:11px
+}
+
+.source small{
+  display:block;
+  margin-top:4px
+}
+
+.score{
+  margin-left:auto;
+  color:#a78bfa;
+  font:10px monospace
+}
+
+.chunk,.health div{
+  padding:13px 0;
+  border-bottom:1px solid #273442
+}
+
+.chunk b{
+  display:block;
+  font-size:11px
+}
+
+.chunk span{
+  display:block;
+  color:#718093;
+  font-size:10px;
+  margin-top:5px
+}
+
+table{
+  width:100%;
+  border-collapse:collapse
+}
+
+th,td{
+  text-align:left;
+  padding:13px 10px;
+  border-bottom:1px solid #273442;
+  font-size:11px
+}
+
+th{
+  color:#68788a;
+  font:9px monospace
+}
+
+td:first-child{
+  color:#67c8ed;
+  font-family:monospace
+}
+
+.green{color:#35d399!important}
+.amber{color:#f59e0b!important}
+.red{color:#ef6b73!important}
+
+.health div{
+  display:flex;
+  justify-content:space-between
+}
+
+.health span{color:#7d8b9a;font-size:11px}
+.health b{font:10px monospace}
+
+footer{
+  text-align:center;
+  padding:23px;
+  border-top:1px solid #273443;
+  margin-top:12px
+}
+
+@media(max-width:850px){
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .grid{grid-template-columns:1fr}
+  .wide{grid-column:span 1}
+}
+
+@media(max-width:550px){
+  header{display:block;padding:22px}
+  .status{margin-top:12px}
+  .stats{grid-template-columns:1fr}
+  main{width:94%}
+  table{min-width:650px}
+  .panel{overflow-x:auto}
+}
