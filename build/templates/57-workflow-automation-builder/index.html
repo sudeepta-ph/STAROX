@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workflow Automation Builder</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="eyebrow">STAROX / AUTOMATION</span>
+    <h1>Workflow Automation Builder</h1>
+  </div>
+  <div class="top-actions">
+    <span class="status">● SAVED</span>
+    <button id="run">▶ Run workflow</button>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <aside class="sidebar">
+    <small>WORKFLOW</small>
+    <h2>Invoice Processing</h2>
+
+    <div class="meta">
+      <span>STATUS</span>
+      <b>ACTIVE</b>
+    </div>
+
+    <div class="meta">
+      <span>LAST RUN</span>
+      <b>2 min ago</b>
+    </div>
+
+    <div class="meta">
+      <span>RUNS TODAY</span>
+      <b>128</b>
+    </div>
+
+    <hr>
+
+    <small>NODE LIBRARY</small>
+
+    <button class="node-btn">⚡ Trigger</button>
+    <button class="node-btn">◆ Action</button>
+    <button class="node-btn">◇ Condition</button>
+    <button class="node-btn">↗ Webhook</button>
+    <button class="node-btn">✉ Notification</button>
+  </aside>
+
+  <main class="canvas">
+    <div class="canvas-head">
+      <div>
+        <small>WORKFLOW CANVAS</small>
+        <span>Invoice Processing / v2.4</span>
+      </div>
+      <div class="zoom">− &nbsp; 100% &nbsp; +</div>
+    </div>
+
+    <div class="flow">
+
+      <div class="node trigger">
+        <div class="node-title">
+          <span class="icon">⚡</span>
+          <div>
+            <small>TRIGGER</small>
+            <b>New Invoice</b>
+          </div>
+        </div>
+        <p>When invoice is received</p>
+        <span class="port right"></span>
+      </div>
+
+      <div class="line"></div>
+
+      <div class="node">
+        <div class="node-title">
+          <span class="icon">◆</span>
+          <div>
+            <small>ACTION</small>
+            <b>Extract Data</b>
+          </div>
+        </div>
+        <p>Read invoice fields using OCR</p>
+        <span class="port left"></span>
+        <span class="port right"></span>
+      </div>
+
+      <div class="line"></div>
+
+      <div class="node condition">
+        <div class="node-title">
+          <span class="icon">◇</span>
+          <div>
+            <small>CONDITION</small>
+            <b>Amount &gt; $5,000?</b>
+          </div>
+        </div>
+        <p>Route invoice based on amount</p>
+        <span class="port left"></span>
+        <span class="port right"></span>
+      </div>
+
+      <div class="branches">
+        <div>
+          <span class="branch-label">YES</span>
+          <div class="line short"></div>
+          <div class="node small-node">
+            <small>ACTION</small>
+            <b>Manager Approval</b>
+          </div>
+        </div>
+
+        <div>
+          <span class="branch-label">NO</span>
+          <div class="line short"></div>
+          <div class="node small-node">
+            <small>ACTION</small>
+            <b>Auto Approve</b>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <aside class="inspector">
+    <small>NODE INSPECTOR</small>
+    <h2>Extract Data</h2>
+
+    <label>Node type</label>
+    <div class="field">Action</div>
+
+    <label>Name</label>
+    <input value="Extract Data">
+
+    <label>Description</label>
+    <textarea>Read invoice fields using OCR</textarea>
+
+    <label>Service</label>
+    <div class="field">Document AI</div>
+
+    <label>Timeout</label>
+    <div class="field">30 seconds</div>
+
+    <button class="save" id="save">Save changes</button>
+  </aside>
+
+</div>
+
+<footer>
+  <span>WORKFLOW ENGINE ONLINE</span>
+  <span>3 NODES · 1 CONDITION · 128 RUNS TODAY</span>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
