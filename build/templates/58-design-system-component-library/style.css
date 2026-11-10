@@ -1,0 +1,311 @@
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#f8fafc;
+  color:#111827;
+  font-family:Inter,Arial,sans-serif;
+  min-height:100vh
+}
+
+button,select{font:inherit}
+
+header{
+  height:70px;
+  background:#fff;
+  border-bottom:1px solid #e5e7eb;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 28px
+}
+
+.eyebrow,small{
+  display:block;
+  color:#6b7280;
+  font:10px "Geist Mono","Courier New",monospace;
+  letter-spacing:.08em
+}
+
+h1{font-size:19px;margin-top:5px}
+.header-right{display:flex;align-items:center;gap:15px}
+.version{font:10px "Geist Mono",monospace;color:#6b7280}
+
+.header-right button{
+  background:#111827;
+  color:#fff;
+  border:0;
+  border-radius:6px;
+  padding:8px 14px;
+  cursor:pointer
+}
+
+.layout{
+  display:grid;
+  grid-template-columns:210px 1fr 250px;
+  min-height:calc(100vh - 110px)
+}
+
+.sidebar{
+  background:#fff;
+  border-right:1px solid #e5e7eb;
+  padding:20px 15px
+}
+
+.search{
+  border:1px solid #e5e7eb;
+  border-radius:6px;
+  padding:9px 10px;
+  color:#9ca3af;
+  font-size:11px;
+  margin-bottom:22px
+}
+
+.sidebar small{margin:20px 5px 8px}
+
+.sidebar a{
+  display:block;
+  padding:8px 10px;
+  border-radius:5px;
+  color:#4b5563;
+  font-size:12px;
+  cursor:pointer
+}
+
+.sidebar a:hover,.sidebar .active{
+  background:#f1f5f9;
+  color:#111827;
+  font-weight:600
+}
+
+main{
+  padding:30px 35px;
+  max-width:1000px;
+  width:100%
+}
+
+.page-title{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-bottom:25px
+}
+
+h2{font-size:27px;margin:7px 0}
+.page-title p,.section-head p{
+  color:#6b7280;
+  font-size:12px
+}
+
+.status{
+  color:#15803d;
+  font:10px "Geist Mono",monospace;
+  background:#f0fdf4;
+  border:1px solid #bbf7d0;
+  padding:6px 9px;
+  border-radius:20px
+}
+
+.panel{
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  margin-bottom:18px;
+  overflow:hidden
+}
+
+.section-head{
+  padding:18px 20px;
+  border-bottom:1px solid #e5e7eb;
+  display:flex;
+  justify-content:space-between;
+  align-items:center
+}
+
+h3{font-size:14px;margin-bottom:5px}
+.section-head code{
+  color:#6b7280;
+  font:10px "Geist Mono",monospace
+}
+
+.preview{
+  padding:30px 20px;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center
+}
+
+.btn{
+  padding:9px 15px;
+  border-radius:6px;
+  border:1px solid transparent;
+  font-size:11px;
+  cursor:pointer;
+  transition:.2s
+}
+
+.primary{background:#111827;color:#fff}
+.primary:hover{background:#374151}
+
+.secondary{
+  background:#fff;
+  color:#111827;
+  border-color:#d1d5db
+}
+
+.ghost{
+  background:transparent;
+  color:#374151
+}
+
+.danger{
+  background:#fff;
+  color:#dc2626;
+  border-color:#fecaca
+}
+
+.btn:disabled{
+  opacity:.4;
+  cursor:not-allowed
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:11px
+}
+
+th{
+  background:#f8fafc;
+  color:#6b7280;
+  text-align:left;
+  font:9px "Geist Mono",monospace
+}
+
+th,td{
+  padding:13px 20px;
+  border-bottom:1px solid #e5e7eb
+}
+
+td:first-child{
+  color:#2563eb;
+  font-family:"Geist Mono",monospace
+}
+
+td:nth-child(2),td:nth-child(3){
+  color:#6b7280;
+  font-family:"Geist Mono",monospace
+}
+
+.token-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:1px;
+  background:#e5e7eb
+}
+
+.token{
+  background:#fff;
+  padding:15px 20px;
+  display:flex;
+  align-items:center;
+  gap:12px
+}
+
+.swatch{
+  width:28px;
+  height:28px;
+  border-radius:5px;
+  border:1px solid #e5e7eb
+}
+
+.dark{background:#111827}
+.light{background:#fff}
+.border{background:#e5e7eb}
+.accent{background:#2563eb}
+
+.token b{
+  display:block;
+  font-size:11px;
+  margin-bottom:4px
+}
+
+.token code{
+  color:#6b7280;
+  font:9px "Geist Mono",monospace
+}
+
+.inspector{
+  background:#fff;
+  border-left:1px solid #e5e7eb;
+  padding:22px 18px
+}
+
+.inspector h3{
+  font-size:15px;
+  margin:10px 0 20px
+}
+
+.live-card{
+  min-height:120px;
+  background:#f8fafc;
+  border:1px dashed #d1d5db;
+  border-radius:7px;
+  display:grid;
+  place-items:center;
+  margin-bottom:22px
+}
+
+.inspector label{
+  display:block;
+  color:#6b7280;
+  font:9px "Geist Mono",monospace;
+  margin:15px 0 7px
+}
+
+select{
+  width:100%;
+  border:1px solid #d1d5db;
+  border-radius:5px;
+  padding:9px;
+  background:#fff;
+  color:#111827;
+  font-size:11px
+}
+
+.access{
+  border:1px solid #e5e7eb;
+  border-radius:6px;
+  padding:10px
+}
+
+.access span{
+  display:block;
+  color:#15803d;
+  font-size:10px;
+  padding:5px 0
+}
+
+footer{
+  height:40px;
+  border-top:1px solid #e5e7eb;
+  background:#fff;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:0 25px;
+  color:#9ca3af;
+  font:9px "Geist Mono",monospace
+}
+
+@media(max-width:950px){
+  .layout{grid-template-columns:190px 1fr}
+  .inspector{display:none}
+}
+
+@media(max-width:650px){
+  .layout{grid-template-columns:1fr}
+  .sidebar{display:none}
+  main{padding:20px}
+  .token-grid{grid-template-columns:1fr}
+}
