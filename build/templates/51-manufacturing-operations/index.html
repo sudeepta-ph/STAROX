@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manufacturing Operations</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header>
+    <div>
+      <span class="eyebrow">STAROX / OPERATIONS</span>
+      <h1>Manufacturing Operations</h1>
+      <p>Real-time factory production and equipment command center</p>
+    </div>
+    <div class="live"><span></span> LIVE • 19 AUG 2026</div>
+  </header>
+
+  <main>
+
+    <section class="metrics">
+      <div class="card">
+        <small>PRODUCTION OUTPUT</small>
+        <strong>8,420</strong>
+        <span class="good">▲ 8.4% vs target</span>
+      </div>
+
+      <div class="card">
+        <small>OEE</small>
+        <strong>87.6%</strong>
+        <span class="good">▲ 2.1%</span>
+      </div>
+
+      <div class="card">
+        <small>DOWNTIME</small>
+        <strong>2.8%</strong>
+        <span class="warn">▼ 0.6% this shift</span>
+      </div>
+
+      <div class="card">
+        <small>QUALITY RATE</small>
+        <strong>98.2%</strong>
+        <span class="good">▲ 0.8%</span>
+      </div>
+    </section>
+
+    <section class="grid">
+
+      <div class="panel wide">
+        <div class="panel-head">
+          <h2>Production Throughput</h2>
+          <span>LAST 8 HOURS</span>
+        </div>
+        <div class="chart">
+          <div style="height:35%"></div>
+          <div style="height:48%"></div>
+          <div style="height:42%"></div>
+          <div style="height:65%"></div>
+          <div style="height:58%"></div>
+          <div style="height:76%"></div>
+          <div style="height:70%"></div>
+          <div style="height:88%"></div>
+        </div>
+        <div class="axis"><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Production Lines</h2>
+          <span>STATUS</span>
+        </div>
+
+        <div class="machine">
+          <div><b>LINE 01</b><span>Assembly</span></div>
+          <strong class="ok">RUNNING</strong>
+        </div>
+        <div class="machine">
+          <div><b>LINE 02</b><span>Packaging</span></div>
+          <strong class="ok">RUNNING</strong>
+        </div>
+        <div class="machine">
+          <div><b>LINE 03</b><span>Fabrication</span></div>
+          <strong class="warning">IDLE</strong>
+        </div>
+        <div class="machine">
+          <div><b>LINE 04</b><span>Quality</span></div>
+          <strong class="ok">RUNNING</strong>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Equipment Telemetry</h2>
+          <span>LIVE</span>
+        </div>
+
+        <div class="telemetry">
+          <div><span>Temperature</span><b>72°C</b></div>
+          <div><span>Vibration</span><b>2.4 mm/s</b></div>
+          <div><span>Pressure</span><b>6.8 bar</b></div>
+          <div><span>Energy Load</span><b>74%</b></div>
+        </div>
+      </div>
+
+      <div class="panel wide">
+        <div class="panel-head">
+          <h2>Maintenance & Alerts</h2>
+          <span>3 ACTIVE</span>
+        </div>
+
+        <div class="alert">
+          <b>⚠ Preventive maintenance due</b>
+          <span>Press Unit 04 • Due in 2 hours</span>
+        </div>
+        <div class="alert">
+          <b>⚠ Temperature threshold warning</b>
+          <span>Assembly Line 02 • 72°C</span>
+        </div>
+        <div class="alert">
+          <b>✓ Quality inspection completed</b>
+          <span>Batch #MFG-2841 • Passed</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Shift Summary</h2>
+          <span>SHIFT A</span>
+        </div>
+        <div class="summary">
+          <div><span>Target</span><b>9,000 units</b></div>
+          <div><span>Completed</span><b>8,420 units</b></div>
+          <div><span>Efficiency</span><b>93.5%</b></div>
+          <div><span>Operators</span><b>42 / 45</b></div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <footer>STAROX MANUFACTURING CONTROL • SYSTEM OPERATIONAL</footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
