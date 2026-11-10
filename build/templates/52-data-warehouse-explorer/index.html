@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Warehouse Explorer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <span class="eyebrow">STAROX / DATA PLATFORM</span>
+    <h1>Data Warehouse Explorer</h1>
+    <p>Explore datasets, schemas, tables and warehouse activity.</p>
+  </div>
+  <div class="status"><span></span> SYSTEM ONLINE</div>
+</header>
+
+<main>
+
+  <section class="stats">
+    <div class="card">
+      <small>WAREHOUSE SIZE</small>
+      <strong>18.4 TB</strong>
+      <span>▲ 4.2% this month</span>
+    </div>
+    <div class="card">
+      <small>DATASETS</small>
+      <strong>126</strong>
+      <span>12 updated today</span>
+    </div>
+    <div class="card">
+      <small>TABLES</small>
+      <strong>1,842</strong>
+      <span>98% healthy</span>
+    </div>
+    <div class="card">
+      <small>ACTIVE QUERIES</small>
+      <strong>24</strong>
+      <span class="amber">6 running</span>
+    </div>
+  </section>
+
+  <section class="workspace">
+
+    <aside class="panel explorer">
+      <div class="panel-title">
+        <h2>Explorer</h2>
+        <button id="refresh">↻</button>
+      </div>
+
+      <input id="search" type="text" placeholder="Search datasets...">
+
+      <div class="tree">
+        <div class="tree-item folder">▾ 📁 analytics</div>
+        <div class="tree-item child">▸ 📊 customer_data</div>
+        <div class="tree-item child">▸ 📊 sales_fact</div>
+        <div class="tree-item child">▸ 📊 product_dim</div>
+
+        <div class="tree-item folder">▾ 📁 finance</div>
+        <div class="tree-item child">▸ 📊 transactions</div>
+        <div class="tree-item child">▸ 📊 revenue_monthly</div>
+
+        <div class="tree-item folder">▾ 📁 operations</div>
+        <div class="tree-item child">▸ 📊 inventory</div>
+        <div class="tree-item child">▸ 📊 production</div>
+      </div>
+    </aside>
+
+    <section class="content">
+
+      <div class="panel">
+        <div class="panel-title">
+          <div>
+            <h2>analytics.customer_data</h2>
+            <p class="muted">Customer master dataset</p>
+          </div>
+          <button class="primary">Open Table</button>
+        </div>
+
+        <div class="table-info">
+          <div><small>ROWS</small><b>24.8M</b></div>
+          <div><small>COLUMNS</small><b>38</b></div>
+          <div><small>UPDATED</small><b>2 min ago</b></div>
+          <div><small>STATUS</small><b class="green">HEALTHY</b></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">
+          <h2>Schema Preview</h2>
+          <span>38 COLUMNS</span>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>FIELD</th>
+              <th>TYPE</th>
+              <th>NULLABLE</th>
+              <th>DESCRIPTION</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>customer_id</td>
+              <td>INTEGER</td>
+              <td>NO</td>
+              <td>Unique customer identifier</td>
+            </tr>
+            <tr>
+              <td>customer_name</td>
+              <td>VARCHAR</td>
+              <td>NO</td>
+              <td>Customer display name</td>
+            </tr>
+            <tr>
+              <td>email</td>
+              <td>VARCHAR</td>
+              <td>YES</td>
+              <td>Customer email address</td>
+            </tr>
+            <tr>
+              <td>created_at</td>
+              <td>TIMESTAMP</td>
+              <td>NO</td>
+              <td>Record creation time</td>
+            </tr>
+            <tr>
+              <td>region</td>
+              <td>VARCHAR</td>
+              <td>YES</td>
+              <td>Customer geographic region</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bottom-grid">
+        <div class="panel">
+          <div class="panel-title">
+            <h2>Recent Queries</h2>
+            <span>LIVE</span>
+          </div>
+
+          <div class="query">
+            <b>SELECT customer_data</b>
+            <span>Completed • 1.2s</span>
+          </div>
+          <div class="query">
+            <b>SELECT sales_fact</b>
+            <span>Running • 4.8s</span>
+          </div>
+          <div class="query">
+            <b>JOIN product_dim</b>
+            <span>Completed • 2.4s</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">
+            <h2>Warehouse Health</h2>
+            <span>98%</span>
+          </div>
+
+          <div class="health">
+            <div><span>Storage</span><b>72%</b></div>
+            <div><span>Compute</span><b>48%</b></div>
+            <div><span>Data Quality</span><b class="green">98%</b></div>
+            <div><span>Pipeline Status</span><b class="green">OK</b></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </section>
+</main>
+
+<footer>STAROX DATA PLATFORM • WAREHOUSE MONITORING</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
