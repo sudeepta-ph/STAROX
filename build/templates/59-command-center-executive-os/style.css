@@ -1,0 +1,246 @@
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:#050505;
+  color:#e5e7eb;
+  font-family:Inter,Arial,sans-serif;
+  min-height:100vh
+}
+
+header{
+  padding:28px 42px;
+  background:#080808;
+  border-bottom:1px solid #252525;
+  display:flex;
+  justify-content:space-between;
+  align-items:center
+}
+
+.eyebrow,small,footer,.head>span{
+  font:10px "IBM Plex Mono","Courier New",monospace;
+  color:#737373;
+  letter-spacing:.08em
+}
+
+h1{font-size:28px;margin:7px 0}
+header p{color:#737373;font-size:13px}
+.date{font:10px "IBM Plex Mono",monospace;color:#a3a3a3}
+
+main{width:90%;max-width:1350px;margin:28px auto}
+
+.hero,.card,.panel{
+  background:#101010;
+  border:1px solid #292929;
+  border-radius:6px
+}
+
+.hero{
+  padding:22px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:16px
+}
+
+.hero h2{
+  font-size:19px;
+  margin-top:7px
+}
+
+.progress{width:300px}
+.progress span{
+  font:9px "IBM Plex Mono",monospace;
+  color:#737373
+}
+.progress b{
+  float:right;
+  font:12px "IBM Plex Mono",monospace
+}
+.progress>div{
+  clear:both;
+  height:5px;
+  background:#292929;
+  margin-top:9px;
+  border-radius:4px
+}
+.progress i{
+  display:block;
+  width:78%;
+  height:100%;
+  background:#e5e7eb
+}
+
+.kpis{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:14px;
+  margin-bottom:16px
+}
+
+.card{padding:19px}
+
+.card strong{
+  display:block;
+  font:600 27px "IBM Plex Mono",monospace;
+  margin:9px 0 5px
+}
+
+.card span{font-size:11px;color:#a3a3a3}
+
+.grid{
+  display:grid;
+  grid-template-columns:1.35fr 1fr;
+  gap:16px
+}
+
+.panel{padding:19px}
+.wide{grid-column:span 2}
+
+.head{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:18px
+}
+
+.head h2{font-size:15px}
+
+.objective{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:7px;
+  padding:15px 0;
+  border-bottom:1px solid #292929
+}
+
+.objective b{font-size:11px}
+.objective span{
+  display:block;
+  color:#737373;
+  font-size:10px;
+  margin-top:4px
+}
+
+.objective strong{
+  font:10px "IBM Plex Mono",monospace
+}
+
+.bar{
+  grid-column:1/-1;
+  height:5px;
+  background:#292929;
+  border-radius:4px;
+  overflow:hidden
+}
+
+.bar i{
+  display:block;
+  height:100%;
+  background:#d4d4d4
+}
+
+.priority,.decision,.signal{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:13px 0;
+  border-bottom:1px solid #292929;
+  font-size:11px
+}
+
+.priority b{
+  color:#737373;
+  font:10px "IBM Plex Mono",monospace
+}
+
+.priority span{flex:1}
+.priority em{
+  color:#d4d4d4;
+  font:9px "IBM Plex Mono",monospace;
+  font-style:normal
+}
+
+.decision{
+  display:block
+}
+
+.decision b{
+  display:block;
+  font-size:11px
+}
+
+.decision span{
+  display:block;
+  color:#737373;
+  font-size:10px;
+  margin-top:5px
+}
+
+.count{
+  background:#292929;
+  color:#e5e7eb;
+  padding:5px 8px;
+  border-radius:10px;
+  font:9px "IBM Plex Mono",monospace
+}
+
+table{
+  width:100%;
+  border-collapse:collapse
+}
+
+th,td{
+  text-align:left;
+  padding:13px 10px;
+  border-bottom:1px solid #292929;
+  font-size:11px
+}
+
+th{
+  color:#666;
+  font:9px "IBM Plex Mono",monospace
+}
+
+td:first-child{
+  color:#d4d4d4;
+  font-family:"IBM Plex Mono",monospace
+}
+
+.high{color:#f87171}
+.amber{color:#f59e0b}
+.green{color:#4ade80}
+
+.signal{
+  justify-content:space-between
+}
+
+.signal span{color:#737373}
+.signal b{
+  color:#d4d4d4;
+  font:9px "IBM Plex Mono",monospace
+}
+
+footer{
+  border-top:1px solid #252525;
+  padding:23px 30px;
+  margin-top:12px;
+  display:flex;
+  justify-content:space-between
+}
+
+@media(max-width:850px){
+  .kpis{grid-template-columns:repeat(2,1fr)}
+  .grid{grid-template-columns:1fr}
+  .wide{grid-column:span 1}
+  .hero{display:block}
+  .progress{width:100%;margin-top:20px}
+}
+
+@media(max-width:550px){
+  header{display:block;padding:22px}
+  .date{margin-top:12px}
+  .kpis{grid-template-columns:1fr}
+  main{width:94%}
+  table{min-width:650px}
+  .panel{overflow-x:auto}
+}
