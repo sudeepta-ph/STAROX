@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hospital Operations Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <aside class="sidebar">
+    <div class="brand">MED<span>OPS</span></div>
+
+    <nav>
+      <a class="active">◉ Command Center</a>
+      <a>▣ Bed Management</a>
+      <a>♙ Staff Roster</a>
+      <a>⚕ Patient Flow</a>
+      <a>▤ Departments</a>
+      <a>⚠ Alerts</a>
+    </nav>
+
+    <div class="hospital">
+      <strong>STAROX MEDICAL</strong>
+      <small>Operations Network</small>
+      <span class="online">● All systems operational</span>
+    </div>
+  </aside>
+
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">HOSPITAL OPERATIONS / LIVE</p>
+        <h1>Operations Command Center</h1>
+        <p class="sub">Real-time overview of hospital capacity, staffing and patient flow.</p>
+      </div>
+      <div class="header-actions">
+        <span id="clock"></span>
+        <button onclick="refreshData()">↻ Refresh</button>
+      </div>
+    </header>
+
+    <section class="kpis">
+      <article class="kpi">
+        <span>BED OCCUPANCY</span>
+        <strong>87%</strong>
+        <small class="good">+2.4% today</small>
+        <div class="bar"><i style="width:87%"></i></div>
+      </article>
+
+      <article class="kpi">
+        <span>AVAILABLE BEDS</span>
+        <strong>42</strong>
+        <small>of 326 total beds</small>
+        <div class="bar"><i style="width:13%"></i></div>
+      </article>
+
+      <article class="kpi">
+        <span>ACTIVE PATIENTS</span>
+        <strong>284</strong>
+        <small class="good">● Stable</small>
+      </article>
+
+      <article class="kpi">
+        <span>STAFF ON DUTY</span>
+        <strong>193</strong>
+        <small>96% coverage</small>
+      </article>
+    </section>
+
+    <section class="grid">
+      <article class="panel wide">
+        <div class="panel-head">
+          <div>
+            <span class="label">PATIENT FLOW</span>
+            <h2>Department Capacity</h2>
+          </div>
+          <span class="live">● LIVE</span>
+        </div>
+
+        <div class="departments">
+          <div class="dept">
+            <div><strong>Emergency</strong><span>92%</span></div>
+            <div class="progress"><i style="width:92%"></i></div>
+            <small>48 patients · 4 waiting</small>
+          </div>
+
+          <div class="dept">
+            <div><strong>ICU</strong><span>88%</span></div>
+            <div class="progress"><i style="width:88%"></i></div>
+            <small>22 patients · 3 available beds</small>
+          </div>
+
+          <div class="dept">
+            <div><strong>General Ward</strong><span>81%</span></div>
+            <div class="progress"><i style="width:81%"></i></div>
+            <small>126 patients · 28 available beds</small>
+          </div>
+
+          <div class="dept">
+            <div><strong>Surgery</strong><span>74%</span></div>
+            <div class="progress"><i style="width:74%"></i></div>
+            <small>12 procedures · 3 rooms active</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="label">STAFFING</span>
+            <h2>Coverage</h2>
+          </div>
+        </div>
+
+        <div class="staff">
+          <div><span>Doctors</span><strong>48 / 50</strong></div>
+          <div><span>Nurses</span><strong>112 / 118</strong></div>
+          <div><span>Technicians</span><strong>33 / 35</strong></div>
+        </div>
+
+        <button class="secondary" onclick="showMessage()">View roster</button>
+      </article>
+
+      <article class="panel">
+        <div class="panel-head">
+          <div>
+            <span class="label">ALERTS</span>
+            <h2>Attention Required</h2>
+          </div>
+          <span class="count">3</span>
+        </div>
+
+        <div class="alerts">
+          <div class="alert high">
+            <b>HIGH</b>
+            <span>Emergency department at 92% capacity</span>
+          </div>
+          <div class="alert medium">
+            <b>MED</b>
+            <span>ICU staffing below target</span>
+          </div>
+          <div class="alert low">
+            <b>LOW</b>
+            <span>Ward 3 equipment inspection due</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel wide">
+        <div class="panel-head">
+          <div>
+            <span class="label">OPERATIONS</span>
+            <h2>Today's Activity</h2>
+          </div>
+        </div>
+
+        <div class="activity">
+          <div><strong>126</strong><span>Admissions</span></div>
+          <div><strong>94</strong><span>Discharges</span></div>
+          <div><strong>37</strong><span>Transfers</span></div>
+          <div><strong>18</strong><span>Surgeries</span></div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
